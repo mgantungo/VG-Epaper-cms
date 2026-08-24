@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "editions",
+  "info": {
+    "singularName": "edition",
+    "pluralName": "editions",
+    "displayName": "Edition",
+    "description": "One published day's newspaper. The source PDF is uploaded here; pages/stories are generated from it by the ingest service."
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "date": { "type": "date", "required": true, "unique": true },
+    "volume": { "type": "string" },
+    "issueNumber": { "type": "string" },
+    "coverPrice": { "type": "decimal", "default": 2000 },
+    "currency": { "type": "string", "default": "UGX" },
+    "pageCount": { "type": "integer", "description": "Filled in automatically once the PDF is processed" },
+    "sourcePdf": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": ["files"],
+      "description": "The original print-ready PDF for this edition. Uploading/replacing this re-triggers the ingest pipeline."
+    },
+    "pipelineStatus": {
+      "type": "enumeration",
+      "enum": ["pending", "processing", "ready_for_review", "published", "failed"],
+      "default": "pending",
+      "description": "pending: no PDF yet. processing: ingest service is rasterizing/extracting. ready_for_review: pages + draft story hotspots created, needs an editor to review before going live. published: reviewed and live. failed: see pipelineError."
+    },
+    "pipelineError": { "type": "text" },
+    "pages": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::page.page",
+      "mappedBy": "edition"
+    },
+    "archivePriceOverride": {
+      "type": "decimal",
+      "description": "Optional per-edition override of the default archive unlock price"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "stories",
+  "info": {
+    "singularName": "story",
+    "pluralName": "stories",
+    "displayName": "Story hotspot",
+    "description": "A clickable region on a page, with the pulled-out article text."
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "page": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::page.page",
+      "inversedBy": "stories"
+    },
+    "top": { "type": "decimal", "required": true, "description": "% from top of the page image" },
+    "left": { "type": "decimal", "required": true, "description": "% from left of the page image" },
+    "width": { "type": "decimal", "required": true, "description": "% of page image width" },
+    "height": { "type": "decimal", "required": true, "description": "% of page image height" },
+    "kicker": { "type": "string" },
+    "headline": { "type": "string", "required": true },
+    "byline": { "type": "string" },
+    "teaser": { "type": "text" },
+    "body": { "type": "richtext" },
+    "source": {
+      "type": "enumeration",
+      "enum": ["auto_detected", "manual"],
+      "default": "manual",
+      "description": "auto_detected hotspots come from the ingest pipeline's text-layout heuristic and are created as drafts — review headline/byline/body and the box coordinates before publishing."
+    },
+    "detectionConfidence": {
+      "type": "decimal",
+      "description": "0–1, only set for auto_detected stories. Low values are more likely to need manual correction."
+    }
+  }
+}

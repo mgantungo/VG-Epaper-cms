@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "subscriptions",
+  "info": {
+    "singularName": "subscription",
+    "pluralName": "subscriptions",
+    "displayName": "Subscription",
+    "description": "Grants access to whatever edition is 'today' at read time — never archive dates, those are individual Purchases."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["active", "past_due", "cancelled"],
+      "default": "cancelled"
+    },
+    "plan": { "type": "string", "default": "monthly" },
+    "provider": { "type": "string" },
+    "providerSubscriptionId": { "type": "string" },
+    "currentPeriodEnd": { "type": "datetime", "description": "Middleware checks this against now(), not just `status`, so an expired-but-not-yet-synced subscription doesn't grant access" }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "purchases",
+  "info": {
+    "singularName": "purchase",
+    "pluralName": "purchases",
+    "displayName": "Purchase",
+    "description": "A one-off unlock of a single archive edition by a user."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "edition": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::edition.edition"
+    },
+    "amount": { "type": "decimal", "required": true },
+    "currency": { "type": "string", "default": "UGX" },
+    "provider": { "type": "string", "description": "e.g. 'flutterwave', 'pesapal' — whatever your real gateway is" },
+    "providerReference": { "type": "string", "description": "Transaction/reference id from the gateway, for reconciliation" },
+    "status": {
+      "type": "enumeration",
+      "enum": ["pending", "completed", "failed", "refunded"],
+      "default": "pending"
+    },
+    "completedAt": { "type": "datetime" }
+  }
+}

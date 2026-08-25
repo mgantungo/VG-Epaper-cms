@@ -10,6 +10,7 @@ module.exports = [
         'http://localhost:3871',
         'http://localhost:4161',
         'https://epapercms.visiongroup.co.ug',
+        'https://epapersapi.visiongroup.co.ug'
       ],
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
       headers: ['Content-Type', 'Authorization', 'Accept', 'Origin'],

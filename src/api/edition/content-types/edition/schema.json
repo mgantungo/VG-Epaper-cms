@@ -12,7 +12,7 @@
     "date": { "type": "date", "required": true, "unique": true },
     "volume": { "type": "string" },
     "issueNumber": { "type": "string" },
-    "coverPrice": { "type": "decimal", "default": 2000 },
+    "coverPrice": { "type": "decimal", "default": 500 },
     "currency": { "type": "string", "default": "UGX" },
     "pageCount": { "type": "integer", "description": "Filled in automatically once the PDF is processed" },
     "sourcePdf": {
@@ -38,6 +38,16 @@
     "archivePriceOverride": {
       "type": "decimal",
       "description": "Optional per-edition override of the default archive unlock price"
+    },
+    "publicationCode": {
+      "type": "string",
+      "default": "NV",
+      "description": "Constant per paper (e.g. 'NV' for New Vision) — a fixed default is all this needs while there's only one publication on this platform. Exists now so adding a second paper later doesn't require another schema migration; the SKU below is what actually needs it to stay unambiguous."
+    },
+    "sku": {
+      "type": "string",
+      "unique": true,
+      "description": "Auto-generated on create, never entered by hand — see content-types/edition/lifecycles.js. Format: YYYYMMDD-PUBLICATIONCODE-ISSUENUMBER-RANDOM4. This is what Entitlement/Transaction records should reference for an unambiguous 'exactly this edition' link — `date` alone stops being unique the moment a second publicationCode exists on this platform."
     }
   }
 }

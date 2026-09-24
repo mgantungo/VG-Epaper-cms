@@ -1,0 +1,119 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_transactions",
+  "info": {
+    "singularName": "epaper-transaction",
+    "pluralName": "epaper-transactions",
+    "displayName": "Epaper Transaction"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "invoice_number": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "receipt_token": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "private": true
+    },
+    "frontend_status": {
+      "type": "enumeration",
+      "enum": ["pending", "processing", "success", "failed", "timeout"],
+      "default": "pending",
+      "required": true
+    },
+    "aggregator_status": {
+      "type": "enumeration",
+      "enum": ["not_sent", "initiated", "processing", "successful", "failed", "timeout", "unknown"],
+      "default": "not_sent",
+      "required": true
+    },
+    "amount": {
+      "type": "biginteger",
+      "required": true
+    },
+    "currency": {
+      "type": "string",
+      "default": "UGX"
+    },
+    "phone_number": {
+      "type": "string",
+      "required": true
+    },
+    "payment_method": {
+      "type": "string",
+      "required": true
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "organization": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-organization.epaper-organization"
+    },
+    "plan": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-plan.epaper-plan"
+    },
+    "purchase_kind": {
+      "type": "enumeration",
+      "enum": ["personal", "organization_new", "organization_topup"],
+      "required": true
+    },
+    "customer_name": {
+      "type": "string"
+    },
+    "customer_email": {
+      "type": "string"
+    },
+    "customer_phone": {
+      "type": "string"
+    },
+    "transaction_data": {
+      "type": "json"
+    },
+    "payment_request_sent": {
+      "type": "boolean",
+      "default": false
+    },
+    "payment_request_sent_at": {
+      "type": "datetime"
+    },
+    "integrator_transaction_ref": {
+      "type": "string"
+    },
+    "aggregator_response_log": {
+      "type": "json"
+    },
+    "callback_received": {
+      "type": "boolean",
+      "default": false
+    },
+    "callback_received_at": {
+      "type": "datetime"
+    },
+    "payment_success": {
+      "type": "boolean",
+      "default": false
+    },
+    "failure_reason": {
+      "type": "text"
+    },
+    "entitlement": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::epaper-entitlement.epaper-entitlement",
+      "mappedBy": "transaction"
+    }
+  }
+}

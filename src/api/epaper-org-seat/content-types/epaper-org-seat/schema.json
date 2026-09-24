@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_org_seats",
+  "info": {
+    "singularName": "epaper-org-seat",
+    "pluralName": "epaper-org-seats",
+    "displayName": "Epaper Org Seat"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "organization": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-organization.epaper-organization",
+      "inversedBy": "seats"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "assignedAt": {
+      "type": "datetime"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_entitlements",
+  "info": {
+    "singularName": "epaper-entitlement",
+    "pluralName": "epaper-entitlements",
+    "displayName": "Epaper Entitlement"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "organization": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-organization.epaper-organization",
+      "inversedBy": "entitlements"
+    },
+    "plan": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-plan.epaper-plan"
+    },
+    "coverageStart": {
+      "type": "date",
+      "required": true
+    },
+    "coverageEnd": {
+      "type": "date",
+      "required": true
+    },
+    "amountPaid": {
+      "type": "biginteger"
+    },
+    "currency": {
+      "type": "string",
+      "default": "UGX"
+    },
+    "transaction": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::epaper-transaction.epaper-transaction"
+    }
+  }
+}

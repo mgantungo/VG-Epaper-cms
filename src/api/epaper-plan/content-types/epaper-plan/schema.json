@@ -1,0 +1,52 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_plans",
+  "info": {
+    "singularName": "epaper-plan",
+    "pluralName": "epaper-plans",
+    "displayName": "Epaper Plan"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "key": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "label": {
+      "type": "string",
+      "required": true
+    },
+    "kind": {
+      "type": "enumeration",
+      "enum": ["daily", "period_subscription", "single_archive", "all_archive_access"],
+      "required": true
+    },
+    "durationDays": {
+      "type": "integer"
+    },
+    "price": {
+      "type": "biginteger",
+      "required": true
+    },
+    "currency": {
+      "type": "string",
+      "default": "UGX"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "allowsOrgPurchase": {
+      "type": "boolean",
+      "default": false
+    },
+    "sortOrder": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

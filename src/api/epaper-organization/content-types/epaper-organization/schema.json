@@ -1,0 +1,40 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_organizations",
+  "info": {
+    "singularName": "epaper-organization",
+    "pluralName": "epaper-organizations",
+    "displayName": "Epaper Organization"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "owner": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "seats": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::epaper-org-seat.epaper-org-seat",
+      "mappedBy": "organization"
+    },
+    "entitlements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::epaper-entitlement.epaper-entitlement",
+      "mappedBy": "organization"
+    }
+  }
+}

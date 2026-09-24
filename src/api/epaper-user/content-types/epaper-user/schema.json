@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_users",
+  "info": {
+    "singularName": "epaper-user",
+    "pluralName": "epaper-users",
+    "displayName": "Epaper User",
+    "description": "The real identity/credential store for epaper readers — replaces plugin::users-permissions.user for this app. passwordHash never leaves this content-type's own controller; see services/epaper-user.js."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "email": {
+      "type": "email",
+      "required": true,
+      "unique": true
+    },
+    "passwordHash": {
+      "type": "string",
+      "required": true,
+      "private": true
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "tokenVersion": {
+      "type": "integer",
+      "default": 0,
+      "private": true
+    }
+  }
+}

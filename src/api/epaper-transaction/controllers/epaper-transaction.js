@@ -4,27 +4,15 @@
  * src/api/epaper-transaction/controllers/epaper-transaction.js
  *
  * Same three-action shape as VisionShop's transaction-processing, plus a
- * fourth (receipt) it already had too:
- *   - initialize: create the pending transaction + request payment from the integrator
- *   - callback:   the integrator's webhook — on success, this is also where
- *                 the actual Entitlement gets created (VisionShop's callback
- *                 has no equivalent step, since it doesn't grant "access,"
- *                 just marks an order paid)
- *   - status:     polled by the frontend while waiting on the customer's PIN
- *   - receipt:    full detail, once, for the confirmation page
+ * fourth (receipt) it already had too. This controller only ever sets
+ * aggregator_status — never frontend_status directly; content-types/
+ * epaper-transaction/lifecycles.js derives frontend_status every time.
  *
- * Same rule as VisionShop: this controller only ever sets aggregator_status
- * — never frontend_status directly. content-types/epaper-transaction/
- * lifecycles.js derives frontend_status every time, so that mapping lives
- * in exactly one place.
+ * All DB access via strapi.db.query(...), not entityService/Documents API.
  *
- * All DB access via strapi.db.query(...), not entityService/Documents API —
- * identical behavior on Strapi 4 and 5.
- *
- * This does NOT receive Strapi user-auth context (routes are auth:false,
- * same reasoning as VisionShop: the caller here is the middleware, already
- * having verified the reader's identity itself, passing userId explicitly —
- * not a browser calling Strapi directly).
+ * This does NOT receive Strapi user-auth context (routes are auth:false) —
+ * the caller here is the middleware, already having verified the reader's
+ * identity itself, passing userId explicitly.
  */
 
 const { createCoreController } = require('@strapi/strapi').factories;
@@ -44,7 +32,13 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 	//         organizationName?,   // required if purchaseKind === 'organization_new'
 	//         organizationId?,     // required if purchaseKind === 'organization_topup'
 	//         seatCount?,          // org purchases only, default 1
-	//         archiveDate? }       // required if the plan's kind is 'single_archive'
+	//         archiveDate?,        // single_archive plans — one date (back-compat)
+	//         archiveDates? }      // single_archive plans — "buy any number of
+	//                              // archives in one purchase": an array of dates,
+	//                              // price scales by how many are selected.
+	//                              // archiveDate is still accepted as a single-
+	//                              // element equivalent; if both are given,
+	//                              // archiveDates wins.
 	async initialize(ctx) {
 		const body = ctx.request.body || {};
 		const { userId, phoneNumber, paymentmethod, planKey, purchaseKind } = body;
@@ -83,11 +77,23 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 			ctx.body = { error: `No active plan with key "${planKey}"` };
 			return;
 		}
-		if (plan.kind === 'single_archive' && !body.archiveDate) {
-			ctx.status = 400;
-			ctx.body = { error: 'archiveDate is required for this plan' };
-			return;
+
+		// Normalize to an array regardless of which shape the caller sent —
+		// archiveDates (plural, "any number of archives") is the primary
+		// shape now; a single archiveDate is still accepted for back-compat,
+		// treated as a one-element array. Duplicates are stripped, not
+		// billed twice for the same date.
+		let archiveDates = [];
+		if (plan.kind === 'single_archive') {
+			const raw = Array.isArray(body.archiveDates) ? body.archiveDates : (body.archiveDate ? [body.archiveDate] : []);
+			archiveDates = [...new Set(raw.filter(Boolean))];
+			if (archiveDates.length === 0) {
+				ctx.status = 400;
+				ctx.body = { error: 'archiveDate or archiveDates is required for this plan' };
+				return;
+			}
 		}
+
 		const isOrgPurchase = purchaseKind !== 'personal';
 		if (isOrgPurchase && !plan.allowsOrgPurchase) {
 			ctx.status = 400;
@@ -96,12 +102,14 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 		}
 
 		// Amount is computed here from the plan's own price — NEVER trusted
-		// from the client. A client-submitted amount would let anyone request
-		// a real payment prompt for a self-chosen (e.g. tiny) figure; only the
-		// seat count varies the total, and even that is clamped to a sane
-		// minimum of 1.
+		// from the client. Scales by seat count (org purchases) AND by how
+		// many archive dates were selected — a client-submitted amount
+		// would let anyone request a real payment prompt for a self-chosen
+		// figure; only these two multipliers vary the total, and both are
+		// derived server-side from what was actually validated above.
 		const seatCount = isOrgPurchase ? Math.max(1, parseInt(body.seatCount, 10) || 1) : 1;
-		const amount = plan.price * seatCount;
+		const dateMultiplier = plan.kind === 'single_archive' ? archiveDates.length : 1;
+		const amount = plan.price * seatCount * dateMultiplier;
 
 		const service = strapi.service(UID);
 
@@ -125,7 +133,7 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 					transaction_data: {
 						planKey,
 						seatCount,
-						archiveDate: body.archiveDate || null,
+						archiveDates: plan.kind === 'single_archive' ? archiveDates : null,
 						organizationName: body.organizationName || null
 					},
 					aggregator_response_log: []
@@ -152,15 +160,14 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				}
 			});
 
-			// Same reasoning as VisionShop: never return the raw sequential id —
-			// receipt_token is the only thing the caller needs from here on.
 			ctx.body = {
 				success: 1,
 				receipt_token: updated.receipt_token,
 				invoice_number: updated.invoice_number,
 				status: updated.frontend_status,
 				amount,
-				currency: updated.currency
+				currency: updated.currency,
+				archiveDatesCount: archiveDates.length || undefined
 			};
 		} catch (error) {
 			strapi.log.error('[epaper-transaction.initialize]', error);
@@ -214,11 +221,6 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 
 			ctx.body = { success: true };
 
-			// The one real addition over VisionShop's callback: actually grant
-			// what was paid for. Fire-and-forget after the response is already
-			// sent, same reasoning as VisionShop's tracking-record creation —
-			// a hiccup here shouldn't hold up acknowledging the aggregator's
-			// webhook (they'll retry if we don't 200 promptly).
 			if (isSuccess) {
 				strapi.service(UID).grantEntitlement(strapi, updated).catch(error => {
 					strapi.log.error(`[epaper-transaction.callback] failed to grant entitlement for transaction ${updated.id}`, error);
@@ -258,9 +260,12 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 	},
 
 	// GET /api/epaper-transactions/receipt/:token
-	// Only returns data once payment has actually succeeded — same reasoning
-	// as VisionShop: prevents viewing another customer's purchase detail even
-	// if someone somehow had the token for a still-pending transaction.
+	// Only returns data once payment has actually succeeded. `coverage` is
+	// now an ARRAY, not a single {start,end} object — a single_archive
+	// purchase can grant more than one entitlement in one transaction
+	// (see grantEntitlement's own comment), so this returns every date
+	// range actually granted, not just the first one findOne would have
+	// happened to return.
 	async receipt(ctx) {
 		const { token } = ctx.params;
 		try {
@@ -279,7 +284,7 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				return;
 			}
 
-			const entitlement = await strapi.db.query('api::epaper-entitlement.epaper-entitlement').findOne({
+			const entitlements = await strapi.db.query('api::epaper-entitlement.epaper-entitlement').findMany({
 				where: { transaction: record.id }
 			});
 
@@ -292,7 +297,7 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				payment_method: record.payment_method,
 				plan_label: record.plan?.label,
 				purchase_kind: record.purchase_kind,
-				coverage: entitlement ? { start: entitlement.coverageStart, end: entitlement.coverageEnd } : null
+				coverage: entitlements.map(e => ({ start: e.coverageStart, end: e.coverageEnd }))
 			};
 		} catch (error) {
 			strapi.log.error('[epaper-transaction.receipt]', error);

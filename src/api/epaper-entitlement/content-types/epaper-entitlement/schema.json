@@ -44,8 +44,9 @@
     },
     "transaction": {
       "type": "relation",
-      "relation": "oneToOne",
-      "target": "api::epaper-transaction.epaper-transaction"
+      "relation": "manyToOne",
+      "target": "api::epaper-transaction.epaper-transaction",
+      "inversedBy": "entitlements"
     }
   }
 }

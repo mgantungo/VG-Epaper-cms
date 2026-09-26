@@ -109,9 +109,9 @@
     "failure_reason": {
       "type": "text"
     },
-    "entitlement": {
+    "entitlements": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "oneToMany",
       "target": "api::epaper-entitlement.epaper-entitlement",
       "mappedBy": "transaction"
     }

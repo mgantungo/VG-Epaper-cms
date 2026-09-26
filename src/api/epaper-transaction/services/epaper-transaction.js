@@ -6,9 +6,7 @@
  * normalizePhoneNumber / generateInvoiceNumber / generateReceiptToken /
  * callIntegrator are carried over directly from VisionShop's
  * transaction-processing service — same reasoning, same integrator, no
- * changes needed there. What's new below is specific to epaper: computing
- * how much coverage a plan grants, and turning a successful transaction
- * into the actual Entitlement record that hasAccess() checks against.
+ * changes needed there.
  *
  * Same deliberate constraints as the VisionShop original:
  *   - strapi.db.query(...) for all reads/writes, not entityService/Documents
@@ -45,9 +43,6 @@ function generateInvoiceNumber() {
 	return `EP-${datePart}-${randomPart}`;
 }
 
-// Same reasoning as VisionShop: every customer-facing lookup (status
-// polling, the receipt page) uses this instead of the raw sequential id,
-// which is trivially enumerable.
 function generateReceiptToken() {
 	return crypto.randomBytes(24).toString('base64url');
 }
@@ -86,9 +81,6 @@ async function callIntegrator(record) {
  * Turns a Plan's `kind` into a concrete [coverageStart, coverageEnd] date
  * pair, anchored at `fromDate` (a JS Date — the moment the transaction
  * succeeded, or the requested archive date for single_archive purchases).
- * This is the one place that interprets plan.kind, same reasoning as the
- * lifecycle hook below being the one place that interprets
- * aggregator_status — a single source of truth so the mapping can't drift.
  */
 function computeCoverage(plan, { fromDate, archiveDate }) {
 	const iso = (d) => d.toISOString().slice(0, 10);
@@ -116,21 +108,33 @@ function computeCoverage(plan, { fromDate, archiveDate }) {
 /**
  * Called once, from the callback handler, only after payment is confirmed
  * successful. Creates the Organization (for a brand-new org purchase),
- * then the Entitlement itself, linked back to the transaction that paid
- * for it.
+ * then the Entitlement(s), linked back to the transaction that paid for
+ * them.
+ *
+ * single_archive is the one plan kind that can produce MORE THAN ONE
+ * entitlement from a single transaction — "buy any number of archive
+ * dates in one purchase," not just one at a time. Each selected date
+ * becomes its own entitlement (coverageStart === coverageEnd === that
+ * date), all linked to this same transaction — which is exactly why
+ * Entitlement.transaction had to become a manyToOne relation (was
+ * oneToOne originally; a oneToOne relation can't hold more than one
+ * entitlement per transaction, which this feature fundamentally needs).
+ * Every other plan kind still grants exactly one entitlement, unchanged.
+ *
+ * amountPaid is recorded on the FIRST entitlement created in a multi-date
+ * batch only, not on every one — otherwise summing amountPaid across a
+ * user's entitlements would overcount revenue by the number of dates in
+ * the batch. record.amount already reflects the full batch total (see
+ * the controller's price computation), so it belongs to the transaction
+ * as a whole, not repeated per date.
  */
 async function grantEntitlement(strapi, record) {
 	const plan = await strapi.db.query('api::epaper-plan.epaper-plan').findOne({ where: { id: record.plan } });
 	if (!plan) throw new Error(`Transaction ${record.id} references a missing plan`);
 
 	const data = record.transaction_data || {};
-	const { coverageStart, coverageEnd } = computeCoverage(plan, {
-		fromDate: new Date(),
-		archiveDate: data.archiveDate
-	});
 
 	let organizationId = null;
-
 	if (record.purchase_kind === 'organization_new') {
 		const org = await strapi.db.query(ORGANIZATION_UID).create({
 			data: { name: data.organizationName, owner: record.user, active: true }
@@ -145,18 +149,34 @@ async function grantEntitlement(strapi, record) {
 		organizationId = record.organization;
 	}
 
-	return strapi.db.query(ENTITLEMENT_UID).create({
-		data: {
-			user: organizationId ? null : record.user,
-			organization: organizationId,
-			plan: plan.id,
-			coverageStart,
-			coverageEnd,
-			amountPaid: record.amount,
-			currency: record.currency,
-			transaction: record.id
-		}
-	});
+	// Normalizes to an array regardless of which shape the transaction was
+	// initialized with — accepts the new archiveDates (plural) as well as
+	// the original single archiveDate, so existing callers don't break.
+	const archiveDates = plan.kind === 'single_archive'
+		? (Array.isArray(data.archiveDates) && data.archiveDates.length ? data.archiveDates : (data.archiveDate ? [data.archiveDate] : []))
+		: [null]; // single placeholder iteration for non-archive plan kinds — computeCoverage ignores archiveDate for these
+
+	if (plan.kind === 'single_archive' && archiveDates.length === 0) {
+		throw new Error(`Transaction ${record.id} is a single_archive purchase with no archive date(s) recorded`);
+	}
+
+	const created = [];
+	for (const archiveDate of archiveDates) {
+		const { coverageStart, coverageEnd } = computeCoverage(plan, { fromDate: new Date(), archiveDate });
+		created.push(await strapi.db.query(ENTITLEMENT_UID).create({
+			data: {
+				user: organizationId ? null : record.user,
+				organization: organizationId,
+				plan: plan.id,
+				coverageStart,
+				coverageEnd,
+				amountPaid: created.length === 0 ? record.amount : 0,
+				currency: record.currency,
+				transaction: record.id
+			}
+		}));
+	}
+	return created;
 }
 
 module.exports = createCoreService(UID, () => ({

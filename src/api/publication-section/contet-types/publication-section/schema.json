@@ -1,0 +1,21 @@
+{
+  "kind": "collectionType",
+  "collectionName": "publication_sections",
+  "info": {
+    "singularName": "publication-section",
+    "pluralName": "publication-sections",
+    "displayName": "Publication Section",
+    "description": "A known section name for ONE publication (e.g. 'National News' for NV) — scoped by publicationCode rather than one global list, so a second publication's own section names aren't forced into New Vision's vocabulary. Used by the ingest engine to recognize a page's detected section header cleanly; a page whose header doesn't match any entry here still keeps whatever text was actually detected (see Page.section) rather than being dropped to null — this collection is a naming aid, not a hard constraint."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "publicationCode": {
+      "type": "string",
+      "required": true,
+      "default": "NV",
+      "description": "Matches Edition.publicationCode — which publication this section name belongs to."
+    },
+    "sortOrder": { "type": "integer", "default": 0 }
+  }
+}

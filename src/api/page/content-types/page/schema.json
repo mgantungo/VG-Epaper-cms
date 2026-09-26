@@ -17,18 +17,8 @@
     },
     "pageNumber": { "type": "integer", "required": true },
     "section": {
-      "type": "enumeration",
-      "enum": [
-        "Adverts", "Beat", "Business", "Business Vision", "CSI", "Case Files", "Classified",
-        "Comments", "Community News", "Court", "Crocs", "Election News", "Feature", "Green UG",
-        "Harvest Money", "Health", "Her Vision", "Homes", "International News", "JobMart",
-        "Leisure", "Letters", "Lifestyle", "Motor Mart", "Mwalimu", "NIE", "National News",
-        "New Era", "News", "OPED", "Oil, Gas and Infrastructure", "Opportunities", "PLE",
-        "OLEVEL", "ALEVEL", "Pakasa", "Relationships", "Schools", "Series", "Special Report",
-        "Sport", "Spotlight", "Supplements", "Teen Vision", "TV and Leisure", "The Hot Sport",
-        "Weekend Xtra", "Muslim News", "Back Cover Page"
-      ],
-      "description": "Auto-detected from the page's top masthead band, matched against this exact list — left blank when nothing matches confidently (e.g. cover pages, which carry no section name) rather than storing free text that could drift from this vocabulary."
+      "type": "string",
+      "description": "Auto-detected from the page's top masthead band. Matched against api::publication-section entries for this edition's publicationCode when possible (for clean, canonical naming) — but NOT constrained to that list: a page whose header doesn't match any known entry still keeps whatever text was actually detected, rather than being dropped to null. A fixed global enum was tried first and rejected — it silently discarded any section name belonging to a different publication than New Vision's own list. Left blank only when detection genuinely finds nothing (e.g. cover pages, which carry no section name)."
     },
     "editionSku": {
       "type": "string",

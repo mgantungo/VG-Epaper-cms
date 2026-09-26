@@ -40,7 +40,7 @@
       "type": "enumeration",
       "enum": ["auto_detected", "manual"],
       "default": "manual",
-      "description": "auto_detected hotspots come from the ingest pipeline's text-layout heuristic and are created as drafts — review headline/byline/body and the box coordinates before publishing."
+      "description": "auto_detected hotspots come from the ingest pipeline's text-layout heuristic and are published immediately, not held for review — a deliberate choice prioritizing visibility over pre-publication review; check headline/byline/body/box coordinates after the fact if something looks off, since nothing catches an extraction error before it's live."
     },
     "detectionConfidence": {
       "type": "decimal",

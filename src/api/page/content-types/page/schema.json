@@ -22,7 +22,7 @@
     },
     "editionSku": {
       "type": "string",
-      "description": "Denormalized from the parent Edition's own sku field at creation time — lets a Page be identified/queried/displayed without traversing the edition relation every time."
+      "description": "Denormalized  from the parent Edition's own sku field at creation time — lets a Page be identified/queried/displayed without traversing the edition relation every time."
     },
     "image": {
       "type": "media",

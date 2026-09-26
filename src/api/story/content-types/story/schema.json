@@ -15,6 +15,10 @@
       "target": "api::page.page",
       "inversedBy": "stories"
     },
+    "editionSku": {
+      "type": "string",
+      "description": "Denormalized from the parent Edition's own sku field at creation time — same reasoning as Page.editionSku."
+    },
     "top": { "type": "decimal", "required": true, "description": "% from top of the page image" },
     "left": { "type": "decimal", "required": true, "description": "% from left of the page image" },
     "width": { "type": "decimal", "required": true, "description": "% of page image width" },
@@ -24,6 +28,14 @@
     "byline": { "type": "string" },
     "teaser": { "type": "text" },
     "body": { "type": "richtext" },
+    "continuesToPage": {
+      "type": "integer",
+      "description": "Set when the ingest engine found an explicit jump-line on this story (e.g. 'Turned to Page 39') — the page this story's text continues onto. Confidence is intentionally binary: only set when an explicit marker was found in the text, never guessed from layout alone — a real front-page lead story spanning two pages was found with NO such marker at all, just a headline that grammatically continues; that case is left for an editor to notice and link manually, not auto-linked."
+    },
+    "continuesFromPage": {
+      "type": "integer",
+      "description": "The reverse of continuesToPage — set when this story's own text opens with an explicit 'Continued from Page N' marker."
+    },
     "source": {
       "type": "enumeration",
       "enum": ["auto_detected", "manual"],

@@ -16,7 +16,24 @@
       "inversedBy": "pages"
     },
     "pageNumber": { "type": "integer", "required": true },
-    "section": { "type": "string" },
+    "section": {
+      "type": "enumeration",
+      "enum": [
+        "Adverts", "Beat", "Business", "Business Vision", "CSI", "Case Files", "Classified",
+        "Comments", "Community News", "Court", "Crocs", "Election News", "Feature", "Green UG",
+        "Harvest Money", "Health", "Her Vision", "Homes", "International News", "JobMart",
+        "Leisure", "Letters", "Lifestyle", "Motor Mart", "Mwalimu", "NIE", "National News",
+        "New Era", "News", "OPED", "Oil, Gas and Infrastructure", "Opportunities", "PLE",
+        "OLEVEL", "ALEVEL", "Pakasa", "Relationships", "Schools", "Series", "Special Report",
+        "Sport", "Spotlight", "Supplements", "Teen Vision", "TV and Leisure", "The Hot Sport",
+        "Weekend Xtra", "Muslim News", "Back Cover Page"
+      ],
+      "description": "Auto-detected from the page's top masthead band, matched against this exact list — left blank when nothing matches confidently (e.g. cover pages, which carry no section name) rather than storing free text that could drift from this vocabulary."
+    },
+    "editionSku": {
+      "type": "string",
+      "description": "Denormalized from the parent Edition's own sku field at creation time — lets a Page be identified/queried/displayed without traversing the edition relation every time."
+    },
     "image": {
       "type": "media",
       "multiple": false,

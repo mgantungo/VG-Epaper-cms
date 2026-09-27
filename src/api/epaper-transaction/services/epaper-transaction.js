@@ -129,24 +129,40 @@ function computeCoverage(plan, { fromDate, archiveDate }) {
  * as a whole, not repeated per date.
  */
 async function grantEntitlement(strapi, record) {
-	const plan = await strapi.db.query('api::epaper-plan.epaper-plan').findOne({ where: { id: record.plan } });
-	if (!plan) throw new Error(`Transaction ${record.id} references a missing plan`);
+	// record's relation fields (plan, user, organization) may arrive as
+	// either a bare numeric id OR a populated object, depending on how the
+	// caller obtained this record — db.query()'s own return shape for a
+	// relation isn't guaranteed to be a bare scalar the way it is right
+	// after a plain create(). Assuming one shape here was the actual bug:
+	// `where: { id: record.plan } }` against an unexpected object shape
+	// never matches anything, so the plan lookup silently failed on EVERY
+	// transaction, not just one — confirmed directly: no Entitlement was
+	// ever being created for any successful payment. Extracting explicitly
+	// once, up front, and using these normalized ids everywhere below
+	// closes that regardless of which shape record actually arrives in.
+	const relationId = (value) => (typeof value === 'object' && value !== null ? value.id : value);
+	const planId = relationId(record.plan);
+	const userId = relationId(record.user);
+	const orgTopupId = relationId(record.organization);
+
+	const plan = await strapi.db.query('api::epaper-plan.epaper-plan').findOne({ where: { id: planId } });
+	if (!plan) throw new Error(`Transaction ${record.id} references a missing plan (record.plan was: ${JSON.stringify(record.plan)})`);
 
 	const data = record.transaction_data || {};
 
 	let organizationId = null;
 	if (record.purchase_kind === 'organization_new') {
 		const org = await strapi.db.query(ORGANIZATION_UID).create({
-			data: { name: data.organizationName, owner: record.user, active: true }
+			data: { name: data.organizationName, owner: userId, active: true }
 		});
 		organizationId = org.id;
 		// The buyer themselves gets a seat too — an org owner who paid for
 		// this shouldn't have to separately assign themselves a seat to read.
 		await strapi.db.query(ORG_SEAT_UID).create({
-			data: { organization: org.id, user: record.user, active: true, assignedAt: new Date() }
+			data: { organization: org.id, user: userId, active: true, assignedAt: new Date() }
 		});
 	} else if (record.purchase_kind === 'organization_topup') {
-		organizationId = record.organization;
+		organizationId = orgTopupId;
 	}
 
 	// Normalizes to an array regardless of which shape the transaction was
@@ -165,7 +181,7 @@ async function grantEntitlement(strapi, record) {
 		const { coverageStart, coverageEnd } = computeCoverage(plan, { fromDate: new Date(), archiveDate });
 		created.push(await strapi.db.query(ENTITLEMENT_UID).create({
 			data: {
-				user: organizationId ? null : record.user,
+				user: organizationId ? null : userId,
 				organization: organizationId,
 				plan: plan.id,
 				coverageStart,

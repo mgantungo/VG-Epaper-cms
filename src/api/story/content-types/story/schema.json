@@ -19,10 +19,14 @@
       "type": "string",
       "description": "Denormalized from the parent Edition's own sku field at creation time — same reasoning as Page.editionSku."
     },
-    "top": { "type": "decimal", "required": true, "description": "% from top of the page image" },
+    "top": { "type": "decimal", "required": true, "description": "% from top of the page image — the overall bounding box across every region this story occupies (see `regions` below), kept for any caller that just needs one rectangle" },
     "left": { "type": "decimal", "required": true, "description": "% from left of the page image" },
     "width": { "type": "decimal", "required": true, "description": "% of page image width" },
     "height": { "type": "decimal", "required": true, "description": "% of page image height" },
+    "regions": {
+      "type": "json",
+      "description": "The actual heatmap — an array of { top, left, width, height } (same % units as the fields above), one rectangle per COLUMN this story's text occupies, plus a separate one for the headline if it spans wider than any single column. A single top/left/width/height box was found to be structurally wrong for multi-column stories: it stretches from the leftmost occupied column's left edge to the rightmost's right edge, covering the gutters between columns and any unrelated content sandwiched between them if the columns don't have matching line counts. This is what a reader-facing heatmap overlay should actually render — one highlighted rectangle per entry, not the single top/left/width/height box."
+    },
     "kicker": { "type": "string" },
     "headline": { "type": "string", "required": true },
     "byline": { "type": "string" },

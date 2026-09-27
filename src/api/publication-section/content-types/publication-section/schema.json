@@ -16,6 +16,11 @@
       "default": "NV",
       "description": "Matches Edition.publicationCode — which publication this section name belongs to."
     },
-    "sortOrder": { "type": "integer", "default": 0 }
+    "sortOrder": { "type": "integer", "default": 0 },
+    "skipStoryExtraction": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the ingest engine never attempts story extraction on a page whose detected section matches this entry — the page image is still created and viewable, just with no Story candidates. Meant for sections that are structurally not editorial content (Crocs, Adverts/Advert, Advertorial, Leisure, PLE, OLEVEL, ALEVEL, per the initial list) or that keep producing garbled/wrong extractions for reasons specific to that section's layout. Growable over time through Strapi admin — flip this flag on a new entry rather than needing a code change each time a new section needs excluding."
+    }
   }
 }

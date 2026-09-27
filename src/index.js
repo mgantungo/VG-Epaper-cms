@@ -3,7 +3,42 @@
 const INGEST_SERVICE_URL = process.env.INGEST_SERVICE_URL || 'http://localhost:4158';
 const INGEST_WEBHOOK_SECRET = process.env.INGEST_WEBHOOK_SECRET;
 
+// Guards against notifying ingest twice for what is logically ONE save.
+// The `update` branch below already protects against a false trigger on
+// saves that never touched sourcePdf (comparing against a fetched "before"
+// state) — but there was no equivalent protection on `create`, and Strapi
+// 5's document-service internals are documented (see this file's own
+// comment further down) to sometimes invoke a single logical operation's
+// middleware more than once. A second invocation for the SAME create
+// necessarily produces the SAME resulting documentId, so a short in-memory
+// window keyed by documentId is enough to catch it — this is a real,
+// specific incident, not theoretical: one PDF upload produced two full
+// sets of Pages/Story hotspots under the one Edition it should have
+// created, all correctly sharing one editionSku (that part was working as
+// designed), just doubled.
+// 10s is generous relative to how close together two invocations of the
+// SAME save would land (milliseconds), while short enough that a genuine,
+// deliberate re-upload moments later still triggers normally.
+const DEDUPE_WINDOW_MS = 10_000;
+const recentlyNotified = new Map(); // documentId -> timestamp of last notify
+
+function alreadyNotifiedRecently(documentId) {
+  const last = recentlyNotified.get(documentId);
+  const now = Date.now();
+  if (last && now - last < DEDUPE_WINDOW_MS) return true;
+  recentlyNotified.set(documentId, now);
+  // Opportunistic cleanup so this Map doesn't grow forever over a long-running process.
+  for (const [id, ts] of recentlyNotified) {
+    if (now - ts > DEDUPE_WINDOW_MS) recentlyNotified.delete(id);
+  }
+  return false;
+}
+
 async function notifyIngest(strapi, editionDocumentId) {
+  if (alreadyNotifiedRecently(editionDocumentId)) {
+    strapi.log.warn(`[edition ingest middleware] suppressed a duplicate ingest trigger for ${editionDocumentId} within ${DEDUPE_WINDOW_MS}ms of the last one`);
+    return;
+  }
   try {
     await fetch(`${INGEST_SERVICE_URL}/ingest/edition/${editionDocumentId}`, {
       method: 'POST',
@@ -54,6 +89,11 @@ module.exports = {
      * looks like an update). Document Service Middleware operates at the
      * level Strapi's own docs recommend for anything beyond raw DB-row
      * bookkeeping. See: https://docs.strapi.io/cms/api/document-service/middlewares
+     *
+     * That said, Document Service Middleware isn't automatically immune to
+     * the same category of double-invocation — see notifyIngest()'s own
+     * dedupe guard above, added after exactly that was observed for a
+     * `create`.
      */
     strapi.documents.use(async (context, next) => {
       const isEdition = context.uid === 'api::edition.edition';
@@ -61,6 +101,8 @@ module.exports = {
         context.params?.data &&
         Object.prototype.hasOwnProperty.call(context.params.data, 'sourcePdf')
       );
+
+      strapi.log.debug(`[edition ingest middleware] documents.use fired: uid=${context.uid} action=${context.action} touchesPdfKey=${touchesPdfKey}`);
 
       let pdfActuallyChanged = false;
 

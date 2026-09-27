@@ -222,7 +222,20 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 			ctx.body = { success: true };
 
 			if (isSuccess) {
-				strapi.service(UID).grantEntitlement(strapi, updated).catch(error => {
+				// update()'s own return value does NOT include relation fields
+				// like plan/user/organization — confirmed directly: passing
+				// `updated` straight into grantEntitlement() produced
+				// "Undefined column(s): [t0.id]" from Knex, because
+				// record.plan was genuinely undefined, not just a
+				// differently-shaped value. Re-fetching with populate right
+				// here, once, gives grantEntitlement() a record that
+				// actually has these fields — populated objects, which its
+				// own relationId() helper already knows how to read.
+				const fullRecord = await strapi.db.query(UID).findOne({
+					where: { id: updated.id },
+					populate: ['plan', 'user', 'organization']
+				});
+				strapi.service(UID).grantEntitlement(strapi, fullRecord).catch(error => {
 					strapi.log.error(`[epaper-transaction.callback] failed to grant entitlement for transaction ${updated.id}`, error);
 				});
 			}

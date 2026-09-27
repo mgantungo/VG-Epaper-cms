@@ -16,8 +16,8 @@ module.exports = {
   routes: [
     {
       method: 'POST',
-      path: '/handle-admins/request-token',
-      handler: 'handle-admin.requestToken',
+      path: '/handle-admins/login',
+      handler: 'handle-admin.login',
       config: { auth: false }
     },
     {

@@ -3,12 +3,16 @@
 /**
  * apps/cms/src/api/handle-admin/controllers/handle-admin.js
  *
- * Two-step, passwordless login for handle.epapers admins — no password at
- * all, every login requires a fresh emailed code. Completely separate
- * identity system from api::epaper-user (readers): own collection, own
- * JWT secret (HANDLE_ADMIN_JWT_SECRET, not the reader-facing
- * JWT_ACCESS_SECRET), own token lifecycle. Nothing here should ever be
- * reachable by a reader's session, and vice versa.
+ * Genuine two-factor login for handle.epapers admins:
+ *   1. login (email + password) — the admin's own real password, set at
+ *      provisioning time. Wrong password never gets a token emailed.
+ *   2. verifyToken (email + alphanumeric code) — only reachable after
+ *      step 1 succeeds; the code is the required second factor, not an
+ *      alternative to the password.
+ *
+ * Completely separate identity system from api::epaper-user (readers):
+ * own collection, own JWT secret (HANDLE_ADMIN_JWT_SECRET, not the
+ * reader-facing JWT_ACCESS_SECRET), own token lifecycle.
  */
 
 const { createCoreController } = require('@strapi/strapi').factories;
@@ -20,62 +24,90 @@ const UID = 'api::handle-admin.handle-admin';
 const TOKEN_TTL_MINUTES = 15;
 const SESSION_TTL = '12h'; // an editorial shift, not a long-lived session — re-login required daily
 
-function generateNumericToken() {
-  // 6 digits, zero-padded — crypto.randomInt is CSPRNG-backed, unlike Math.random.
-  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+// Excludes visually ambiguous characters (0/O, 1/I/l) — this gets typed by
+// hand from an email, not pasted, so a code that's easy to misread costs a
+// real support headache, not just an inconvenience.
+const TOKEN_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function generateAlphanumericToken(length = 8) {
+  let token = '';
+  for (let i = 0; i < length; i++) {
+    token += TOKEN_CHARSET[crypto.randomInt(0, TOKEN_CHARSET.length)];
+  }
+  return token;
 }
 
 function isNewVisionEmail(email) {
   return typeof email === 'string' && /@newvision\.co\.ug$/i.test(email.trim());
 }
 
-module.exports = createCoreController(UID, ({ strapi }) => ({
-  // POST /api/handle-admins/request-token
-  // Body: { email }
-  // Always responds the same way regardless of whether the email
-  // corresponds to a real, active admin — same reasoning as
-  // epaper-user's own login: a response that differs based on account
-  // existence lets an attacker enumerate valid admin emails one guess at
-  // a time. The real work only happens silently, inside this branch.
-  async requestToken(ctx) {
-    const email = (ctx.request.body?.email || '').trim().toLowerCase();
+// A fixed, valid bcrypt hash of an arbitrary, non-real password — verified
+// separately (see the delivery notes) to actually parse and compare
+// without throwing, so it's genuinely safe to use in the code path below.
+// Compared against on a login attempt for an email that doesn't exist, so
+// verifying a nonexistent account takes the same time as verifying a
+// wrong password for a real one — without this, response timing alone
+// reveals which emails are provisioned admins.
+const DUMMY_HASH = '$2b$10$lIzdj/IbK/VKIfNe0ox6v.G7VYYi2EFU/OVJtZDCC68oIvWY2ozGm';
 
-    if (!isNewVisionEmail(email)) {
+module.exports = createCoreController(UID, ({ strapi }) => ({
+  // POST /api/handle-admins/login
+  // Body: { email, password }
+  // Verifies the FIRST factor only. On success, emails the second-factor
+  // token and tells the client to proceed to verify-token — it does NOT
+  // issue a session by itself.
+  async login(ctx) {
+    const email = (ctx.request.body?.email || '').trim().toLowerCase();
+    const password = ctx.request.body?.password || '';
+
+    if (!isNewVisionEmail(email) || !password) {
       ctx.status = 400;
-      ctx.body = { error: 'A @newvision.co.ug email address is required' };
+      ctx.body = { error: 'A @newvision.co.ug email and password are required' };
       return;
     }
 
     const admin = await strapi.db.query(UID).findOne({ where: { email, active: true } });
 
-    if (admin) {
-      const token = generateNumericToken();
-      const tokenHash = await bcrypt.hash(token, 10);
-      const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000);
+    // Always run a bcrypt.compare, even with no matching admin — see
+    // DUMMY_HASH above for why.
+    const passwordMatches = await bcrypt.compare(password, admin?.passwordHash || DUMMY_HASH);
 
-      await strapi.db.query(UID).update({
-        where: { id: admin.id },
-        data: { tokenHash, tokenExpiresAt }
-      });
-
-      try {
-        const emailService = require('../../../services/handle-admin-email.js');
-        await emailService.sendLoginToken(admin.email, token, admin.displayName);
-      } catch (err) {
-        // Logged, not surfaced to the client — same "don't reveal whether
-        // the account exists" reasoning applies to send failures too.
-        strapi.log.error(`[handle-admin.requestToken] failed to send login email to ${admin.email}:`, err);
-      }
+    if (!admin || !passwordMatches) {
+      ctx.status = 401;
+      ctx.body = { error: 'Invalid email or password' };
+      return;
     }
 
-    ctx.body = { success: true, message: 'If that email is a registered admin, a login code has been sent.' };
+    const token = generateAlphanumericToken();
+    const tokenHash = await bcrypt.hash(token, 10);
+    const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000);
+
+    await strapi.db.query(UID).update({
+      where: { id: admin.id },
+      data: { tokenHash, tokenExpiresAt }
+    });
+
+    try {
+      const emailService = require('../../../services/handle-admin-email.js');
+      await emailService.sendLoginToken(admin.email, token, admin.displayName);
+    } catch (err) {
+      strapi.log.error(`[handle-admin.login] password verified but failed to send second-factor email to ${admin.email}:`, err);
+      ctx.status = 502;
+      ctx.body = { error: 'Password correct, but the login code could not be sent — try again shortly' };
+      return;
+    }
+
+    ctx.body = { success: true, message: 'A login code has been sent to your email.' };
   },
 
   // POST /api/handle-admins/verify-token
   // Body: { email, token }
+  // Only reachable meaningfully after login() has succeeded and emailed a
+  // code — an admin with no pending token (never called login, or the
+  // code already expired/was used) gets the same generic failure as a
+  // wrong code, not a distinguishing error.
   async verifyToken(ctx) {
     const email = (ctx.request.body?.email || '').trim().toLowerCase();
-    const token = (ctx.request.body?.token || '').trim();
+    const token = (ctx.request.body?.token || '').trim().toUpperCase();
 
     if (!email || !token) {
       ctx.status = 400;
@@ -85,9 +117,6 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 
     const admin = await strapi.db.query(UID).findOne({ where: { email, active: true } });
 
-    // Constant-shape failure regardless of which check actually failed
-    // (no account, no pending token, expired, wrong code) — same
-    // enumeration-prevention reasoning as requestToken above.
     const genericError = () => {
       ctx.status = 401;
       ctx.body = { error: 'Invalid or expired code' };

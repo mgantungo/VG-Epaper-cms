@@ -16,6 +16,12 @@
       "description": "Must end in @newvision.co.ug — enforced both here (lifecycle) and at the login-request endpoint, so a record can't be created with the wrong domain by mistake either."
     },
     "displayName": { "type": "string", "required": true },
+    "passwordHash": {
+      "type": "string",
+      "private": true,
+      "required": true,
+      "description": "bcrypt hash of the admin's real password — the first authentication factor. Never returned by any API response; verified via bcrypt.compare, never stored or compared as plain text."
+    },
     "active": {
       "type": "boolean",
       "default": true,
@@ -24,7 +30,7 @@
     "tokenHash": {
       "type": "string",
       "private": true,
-      "description": "bcrypt hash of the current pending login token — never the plain code. Cleared after successful verification or expiry."
+      "description": "bcrypt hash of the current pending SECOND-FACTOR login token (alphanumeric, emailed after password verification succeeds) — never the plain code. Cleared after successful verification or expiry."
     },
     "tokenExpiresAt": { "type": "datetime", "private": true },
     "tokenVersion": {

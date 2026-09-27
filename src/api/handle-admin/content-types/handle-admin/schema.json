@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "handle_admins",
+  "info": {
+    "singularName": "handle-admin",
+    "pluralName": "handle-admins",
+    "displayName": "Handle Admin",
+    "description": "An editorial staff account for the handle.epapers admin app (edition ingest management) — completely separate from api::epaper-user, which is for readers. Provisioned manually in Strapi admin; there is no self-registration."
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "email": {
+      "type": "email",
+      "required": true,
+      "unique": true,
+      "description": "Must end in @newvision.co.ug — enforced both here (lifecycle) and at the login-request endpoint, so a record can't be created with the wrong domain by mistake either."
+    },
+    "displayName": { "type": "string", "required": true },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "description": "An inactive admin can never complete login, even with a correct token — set false to revoke access without deleting the record (keeps IngestLog attribution intact)."
+    },
+    "tokenHash": {
+      "type": "string",
+      "private": true,
+      "description": "bcrypt hash of the current pending login token — never the plain code. Cleared after successful verification or expiry."
+    },
+    "tokenExpiresAt": { "type": "datetime", "private": true },
+    "tokenVersion": {
+      "type": "integer",
+      "default": 0,
+      "private": true,
+      "description": "Bumped on every successful login — embedded in the issued JWT, so an older token for this admin can be invalidated (e.g. by an admin forcing re-login) by bumping this without needing a token blocklist."
+    },
+    "lastLoginAt": { "type": "datetime" }
+  }
+}

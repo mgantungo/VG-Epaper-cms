@@ -27,6 +27,10 @@
       "type": "json",
       "description": "The actual heatmap — an array of { top, left, width, height } (same % units as the fields above), one rectangle per COLUMN this story's text occupies, plus a separate one for the headline if it spans wider than any single column. A single top/left/width/height box was found to be structurally wrong for multi-column stories: it stretches from the leftmost occupied column's left edge to the rightmost's right edge, covering the gutters between columns and any unrelated content sandwiched between them if the columns don't have matching line counts. This is what a reader-facing heatmap overlay should actually render — one highlighted rectangle per entry, not the single top/left/width/height box."
     },
+    "layout": {
+      "type": "json",
+      "description": "Reading order used to build this story's text: an ordered array of { role: 'title' | 'column', order, top, left, width, height } in % of the page. Written by the ingest engine for auto stories and by the handle story editor for manual ones; the editor recompiles text from it."
+    },
     "kicker": { "type": "string" },
     "headline": { "type": "string", "required": true },
     "byline": { "type": "string" },
@@ -44,7 +48,17 @@
       "type": "enumeration",
       "enum": ["auto_detected", "manual"],
       "default": "manual",
-      "description": "auto_detected hotspots come from the ingest pipeline's text-layout heuristic and are published immediately, not held for review — a deliberate choice prioritizing visibility over pre-publication review; check headline/byline/body/box coordinates after the fact if something looks off, since nothing catches an extraction error before it's live."
+      "description": "auto_detected hotspots come from the ingest pipeline's text-layout heuristic and are published immediately, not held for review — a deliberate choice prioritizing visibility over pre-publication review; check headline/byline/body/box coordinates after the fact if something looks off, since nothing catches an extraction error before it's live. manual stories are drawn in the handle story editor and survive re-ingest."
+    },
+    "reviewState": {
+      "type": "enumeration",
+      "enum": ["active", "drop_pending", "dropped"],
+      "default": "active",
+      "description": "Only active stories reach readers. drop_pending: an editor's manual story covers this auto story, awaiting Drop or Keep in the handle editor. dropped: hidden from readers, restorable. Empty on stories created before this field existed; treated as active."
+    },
+    "supersededBy": {
+      "type": "string",
+      "description": "documentId of the manual story that replaced this one, when reviewState is drop_pending or dropped."
     },
     "detectionConfidence": {
       "type": "decimal",

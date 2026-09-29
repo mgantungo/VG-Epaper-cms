@@ -30,6 +30,15 @@
       "required": true,
       "allowedTypes": ["images"]
     },
+    "extractionStatus": {
+      "type": "enumeration",
+      "enum": ["pending", "complete", "needs_review", "skipped"],
+      "description": "Completeness of story extraction for this page. complete: every text word is in a story or deliberately excluded (header band, captions, pull quotes, graphics, adverts). needs_review: some text is in no story, or two stories claim the same text — open the page in the handle story editor. skipped: the section is on the skip-extraction list."
+    },
+    "extractionLedger": {
+      "type": "json",
+      "description": "Word counts per bucket, unassigned text lines with their % positions, duplicate claims and suspicious column joins. Written by ingest and after every story editor change."
+    },
     "stories": {
       "type": "relation",
       "relation": "oneToMany",

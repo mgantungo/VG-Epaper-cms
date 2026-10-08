@@ -2,7 +2,9 @@
 
 /**
  * apps/cms/src/api/org-management/services/org-store.js
- * NEW FILE — Phase 2 (organisation management, handle side)
+ * Phase 2 file (organisation management, handle side), UPDATED in Phase 3:
+ * listMembers now also returns invitePending per member. org-members.js
+ * reuses listMembers and listAudit for the Org Admin dashboard.
  *
  * All organisation, contract and admin-assignment logic lives here, inside
  * Strapi, so that multi-row writes (create org + contract + admin seat +
@@ -639,7 +641,7 @@ module.exports = ({ strapi }) => {
       const [seats, total] = await Promise.all([
         q(SEAT).findMany({
           where, offset, limit, orderBy: { assignedAt: 'desc' },
-          populate: { user: { select: ['id', 'email', 'displayName', 'phone'] } }
+          populate: { user: { select: ['id', 'email', 'displayName', 'phone', 'accountSource', 'passwordSetAt'] } }
         }),
         q(SEAT).count({ where })
       ]);
@@ -676,6 +678,8 @@ module.exports = ({ strapi }) => {
           suspendedAt: s.suspendedAt || null,
           suspendedReason: s.suspendedReason || null,
           user: publicUser(s.user),
+          // Added by an Org Admin and hasn't set a password through the invite yet.
+          invitePending: Boolean(s.user && ['org_invite', 'org_import'].includes(s.user.accountSource) && !s.user.passwordSetAt),
           access: {
             current: current ? { start: current.coverageStart, end: current.coverageEnd } : null,
             latestEnd,

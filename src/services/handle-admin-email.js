@@ -15,6 +15,12 @@
  * Required env vars (apps/cms/.env):
  *   HANDLE_EMAIL_SMTP_USER=notifications@visiongroup.co.ug
  *   HANDLE_EMAIL_SMTP_PASS=<the real password>
+ *
+ * UPDATED (organisations, Phase 3): adds sendOrgInvite(), which emails a
+ * reader added by their Organisation Admin a link to set their password.
+ * Uses the same transporter. The link base comes from EPAPER_WEB_URL
+ * (set in org-members.js). Names in the email are HTML-escaped, since
+ * they're typed by Org Admins or come from uploaded spreadsheets.
  */
 
 const nodemailer = require('nodemailer');
@@ -72,6 +78,100 @@ class HandleAdminEmailService {
       strapi.log.error('[handle-admin-email] failed to send login token:', error);
       throw new Error(`Email sending failed: ${error.message}`);
     }
+  }
+
+  /**
+   * opts: { displayName, orgName, inviterName, link, expiresDays }
+   */
+  async sendOrgInvite(toEmail, opts = {}) {
+    const mailOptions = {
+      from: { name: 'New Vision E-Paper', address: process.env.HANDLE_EMAIL_SMTP_USER },
+      to: toEmail,
+      replyTo: process.env.HANDLE_EMAIL_SMTP_USER,
+      subject: opts.orgName
+        ? `${opts.orgName} has given you access to the New Vision e-paper`
+        : 'You have been given access to the New Vision e-paper',
+      html: this.inviteEmailHtml(toEmail, opts),
+      text: this.inviteEmailText(toEmail, opts),
+      headers: { 'X-Mailer': ' ' }
+    };
+
+    try {
+      strapi.log.info(`[handle-admin-email] sending org invite to ${toEmail}`);
+      const result = await this.transporter.sendMail(mailOptions);
+      strapi.log.info(`[handle-admin-email] invite sent to ${toEmail}, messageId: ${result.messageId}`);
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      strapi.log.error('[handle-admin-email] failed to send org invite:', error);
+      throw new Error(`Email sending failed: ${error.message}`);
+    }
+  }
+
+  escape(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  inviteEmailHtml(toEmail, { displayName, orgName, inviterName, link, expiresDays = 14 }) {
+    const e = (v) => this.escape(v);
+    const who = orgName ? `<strong>${e(orgName)}</strong>` : 'Your organisation';
+    const by = inviterName ? ` (added by ${e(inviterName)})` : '';
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your New Vision e-paper access</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { background: #1a1a1a; padding: 30px; text-align: center; color: white; }
+        .header h1 { margin: 0; font-size: 22px; font-weight: 700; }
+        .content { padding: 40px; }
+        .button { display: inline-block; background: #1a1a1a; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; }
+        .link { word-break: break-all; font-size: 12px; color: #6c757d; }
+        .expiry-notice { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 12px; margin: 20px 0; font-size: 14px; }
+        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #6c757d; border-top: 1px solid #dee2e6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header"><h1>New Vision E-Paper</h1></div>
+        <div class="content">
+            <p>Hello ${e(displayName) || 'there'},</p>
+            <p>${who}${by} has given you access to read the New Vision e-paper.</p>
+            <p>Set a password to activate your account. Your sign-in email is <strong>${e(toEmail)}</strong>.</p>
+            <p style="text-align:center;margin:32px 0;"><a class="button" href="${e(link)}">Set your password</a></p>
+            <p class="link">If the button doesn't work, paste this link into your browser:<br>${e(link)}</p>
+            <div class="expiry-notice"><strong>This link expires in ${Number(expiresDays) || 14} days.</strong> If it has expired, ask your organisation admin to resend it.</div>
+            <p>If you weren't expecting this, you can ignore this email.</p>
+        </div>
+        <div class="footer">
+            <p>This is an automated message. Please do not reply.</p>
+            <p>Vision Group &copy; ${new Date().getFullYear()}</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  inviteEmailText(toEmail, { displayName, orgName, inviterName, link, expiresDays = 14 }) {
+    return `NEW VISION E-PAPER — YOUR ACCESS
+
+Hello ${displayName || 'there'},
+
+${orgName || 'Your organisation'}${inviterName ? ` (added by ${inviterName})` : ''} has given you access to read the New Vision e-paper.
+
+Set a password to activate your account. Your sign-in email is ${toEmail}.
+
+${link}
+
+This link expires in ${Number(expiresDays) || 14} days. If it has expired, ask your organisation admin to resend it.
+
+If you weren't expecting this, you can ignore this email.
+---
+This is an automated message. Please do not reply.
+Vision Group © ${new Date().getFullYear()}`;
   }
 
   tokenEmailHtml(displayName, token) {

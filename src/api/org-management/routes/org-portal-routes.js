@@ -2,7 +2,7 @@
 
 /**
  * apps/cms/src/api/org-management/routes/org-portal-routes.js
- * NEW FILE — Phase 3
+ * NEW FILE — Phase 3. UPDATED: members/export.
  *
  * Org Admin dashboard + invite acceptance. Like org-management-routes.js,
  * none of these is auth:false: only the middleware (STRAPI_API_TOKEN)
@@ -15,6 +15,7 @@ module.exports = {
   routes: [
     { method: 'GET', path: '/org-management/portal/summary', handler: `${C}.summary` },
     { method: 'GET', path: '/org-management/portal/members', handler: `${C}.listMembers` },
+    { method: 'GET', path: '/org-management/portal/members/export', handler: `${C}.exportMembers` },
     { method: 'POST', path: '/org-management/portal/members', handler: `${C}.addMember` },
     { method: 'POST', path: '/org-management/portal/members/:seatId/access', handler: `${C}.grantAccess` },
     { method: 'POST', path: '/org-management/portal/members/:seatId/status', handler: `${C}.setStatus` },

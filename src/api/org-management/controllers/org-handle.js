@@ -2,7 +2,7 @@
 
 /**
  * apps/cms/src/api/org-management/controllers/org-handle.js
- * NEW FILE — Phase 2
+ * NEW FILE — Phase 2. UPDATED: exportMembers / previewImport / commitImport for handle admins.
  *
  * Thin HTTP layer over services/org-store.js. Every route is
  * authenticated (no auth:false; see routes/org-management-routes.js), so
@@ -17,6 +17,7 @@
  */
 
 const SERVICE = 'api::org-management.org-store';
+const MEMBERS = 'api::org-management.org-members';
 
 function actorAdminId(ctx) {
   const n = Number(ctx.request.headers['x-actor-admin-id']);
@@ -25,6 +26,7 @@ function actorAdminId(ctx) {
 
 module.exports = ({ strapi }) => {
   const svc = () => strapi.service(SERVICE);
+  const members = () => strapi.service(MEMBERS);
 
   // Maps OrgError (has .status) to that status; anything else is a real
   // fault, so it's logged and returned as a plain 500.
@@ -68,6 +70,12 @@ module.exports = ({ strapi }) => {
     setMemberStatus: handle('setMemberStatus', (ctx) =>
       svc().setMemberStatus(ctx.params.id, ctx.params.seatId, ctx.request.body || {}, actorAdminId(ctx))),
 
-    listAudit: handle('listAudit', (ctx) => svc().listAudit(ctx.params.id, ctx.query || {}))
+    listAudit: handle('listAudit', (ctx) => svc().listAudit(ctx.params.id, ctx.query || {})),
+
+    // Spreadsheet round-trip for a handle admin acting on one organisation.
+    // Same planning and rules as the Org Admin's own upload (org-members.js).
+    exportMembers: handle('exportMembers', (ctx) => members().adminExportMembers(ctx.params.id, actorAdminId(ctx))),
+    previewImport: handle('previewImport', (ctx) => members().adminPreviewImport(ctx.params.id, actorAdminId(ctx), ctx.request.body || {})),
+    commitImport: handle('commitImport', (ctx) => members().adminCommitImport(ctx.params.id, actorAdminId(ctx), ctx.params.importId))
   };
 };

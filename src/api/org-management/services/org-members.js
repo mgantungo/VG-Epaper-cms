@@ -20,6 +20,13 @@
  *     window extends that window instead of stacking a second one.
  *   - seats in use = ACTIVE seats; adding or reactivating respects seatLimit.
  *
+ * UPDATED (spreadsheet round-trip): handle admins can run the same Excel
+ * import for any organisation (adminContext), both sides can export the
+ * current member list (exportMembers) to edit and upload again, and an
+ * existing member's row only changes when it has its own dates or months
+ * (action "keep" otherwise), so re-uploading an unedited export changes
+ * nothing. The upload's default period applies to NEW people only.
+ *
  * Invites: a person added who has no reader account gets one created with
  * an unusable random password plus a one-time invite token (only its
  * SHA-256 is stored). The emailed link lets them set a password, which
@@ -100,11 +107,12 @@ module.exports = ({ strapi }) => {
   const store = () => strapi.service(STORE);
   const userService = () => strapi.service('api::epaper-user.epaper-user');
 
-  async function audit({ orgId, actorUserId, action, targetUserId, targetEmail, meta }) {
+  async function audit({ orgId, actorUserId, actorAdminId, action, targetUserId, targetEmail, meta }) {
     await q(AUDIT).create({
       data: {
         organization: orgId,
         actorUser: actorUserId || null,
+        actorAdmin: actorAdminId || null,
         action,
         targetUser: targetUserId || null,
         targetEmail: targetEmail || null,
@@ -137,6 +145,19 @@ module.exports = ({ strapi }) => {
       actorSeatId: seat.id,
       actorEmail: seat.user?.email,
       actorName: seat.user?.displayName || seat.user?.email
+    };
+  }
+
+  /** A handle admin acting for an organisation. The middleware has already
+   * checked their canManageOrganizations right. */
+  async function adminContext(orgIdRaw, actorAdminIdRaw) {
+    const orgId = toId(orgIdRaw);
+    const actorAdminId = toId(actorAdminIdRaw);
+    const org = await q(ORG).findOne({ where: { id: orgId } });
+    if (!org) throw new OrgError(404, 'Organisation not found');
+    return {
+      orgId, org, actorUserId: null, actorAdminId, actorSeatId: null,
+      actorEmail: null, actorName: 'New Vision'
     };
   }
 
@@ -213,7 +234,7 @@ module.exports = ({ strapi }) => {
   }
 
   /** Creates or extends this member's window to cover [start, end]. */
-  async function applyWindow({ orgId, userId, email, start, end, actorUserId, source }) {
+  async function applyWindow({ orgId, userId, email, start, end, actorUserId, actorAdminId, source }) {
     const touching = await q(ENT).findMany({
       where: {
         organization: { id: orgId },
@@ -230,10 +251,10 @@ module.exports = ({ strapi }) => {
       const row = await q(ENT).create({
         data: {
           organization: orgId, user: userId, scope: 'org_member', grantSource: source,
-          grantedByUser: actorUserId || null, coverageStart: start, coverageEnd: end
+          grantedByUser: actorUserId || null, grantedByAdmin: actorAdminId || null, coverageStart: start, coverageEnd: end
         }
       });
-      await audit({ orgId, actorUserId, action: 'access.create', targetUserId: userId, targetEmail: email, meta: { start, end, source } });
+      await audit({ orgId, actorUserId, actorAdminId, action: 'access.create', targetUserId: userId, targetEmail: email, meta: { start, end, source } });
       return { action: 'created', start, end, entitlementId: row.id };
     }
 
@@ -251,7 +272,7 @@ module.exports = ({ strapi }) => {
       });
     }
     await audit({
-      orgId, actorUserId, action: 'access.extend', targetUserId: userId, targetEmail: email,
+      orgId, actorUserId, actorAdminId, action: 'access.extend', targetUserId: userId, targetEmail: email,
       meta: { from: { start: keep.coverageStart, end: keep.coverageEnd }, to: { start: newStart, end: newEnd }, source }
     });
     return { action: 'extended', start: newStart, end: newEnd, entitlementId: keep.id };
@@ -383,7 +404,25 @@ module.exports = ({ strapi }) => {
       if (seen.has(r.email)) { out.error = `Duplicate of row ${seen.get(r.email)}`; continue; }
       seen.set(r.email, r.row);
 
-      const hasOwnDates = r.input.coverageStart || r.input.coverageEnd || (r.input.months !== null && r.input.months !== '');
+      const hasOwnDates = Boolean(r.input.coverageStart || r.input.coverageEnd || (r.input.months !== null && r.input.months !== ''));
+
+      const user = userByEmail.get(r.email);
+      const seat = user ? seatByUser.get(user.id) : null;
+      if (seat && seat.organization?.id !== ctx.orgId) {
+        out.error = 'Already belongs to another organisation';
+        continue;
+      }
+      if (user) out.userId = user.id;
+
+      // Existing member, no dates or months on their row: leave them as they
+      // are. This is what makes "download members, edit, upload" safe.
+      if (seat && !hasOwnDates) {
+        out.action = 'keep';
+        out.seatId = seat.id;
+        out.notes.push('Already a member; no dates given, so nothing changes');
+        continue;
+      }
+
       let win;
       try {
         win = resolveWindow(merged, hasOwnDates ? r.input : defaults);
@@ -395,14 +434,6 @@ module.exports = ({ strapi }) => {
       out.end = win.end;
       out.clipped = win.clipped;
       if (win.clipped) out.notes.push(`End date shortened to ${win.end}, the end of the paid period`);
-
-      const user = userByEmail.get(r.email);
-      const seat = user ? seatByUser.get(user.id) : null;
-      if (seat && seat.organization?.id !== ctx.orgId) {
-        out.error = 'Already belongs to another organisation';
-        continue;
-      }
-      if (user) out.userId = user.id;
 
       if (seat) {
         out.action = 'extend';
@@ -425,6 +456,7 @@ module.exports = ({ strapi }) => {
       newUsers: count('new_user'),
       addExisting: count('add_existing'),
       extend: count('extend'),
+      keep: count('keep'),
       errors: count('error'),
       clipped: plan.filter((p) => p.clipped).length
     };
@@ -433,7 +465,7 @@ module.exports = ({ strapi }) => {
 
   // ---- public API ------------------------------------------------------------
 
-  return {
+  const api = {
     OrgError,
     context,
 
@@ -646,110 +678,22 @@ module.exports = ({ strapi }) => {
     /** body: { filename, rows: [{ row, email, displayName, phone, coverageStart, coverageEnd, months }],
      *          defaults?: { coverageStart?, coverageEnd?, months? } } */
     async previewImport(actorUserId, body) {
-      const ctx = await context(actorUserId);
-      const rows = Array.isArray(body.rows) ? body.rows : [];
-      if (!rows.length) throw new OrgError(400, 'The file has no rows');
-      if (rows.length > MAX_IMPORT_ROWS) throw new OrgError(400, `The file has ${rows.length} rows; the limit is ${MAX_IMPORT_ROWS}`);
-      const defaults = body.defaults || {};
-
-      const { plan, summary } = await planRows(ctx, rows, defaults);
-      const record = await q(IMPORT).create({
-        data: {
-          organization: ctx.orgId, uploadedBy: ctx.actorUserId, filename: String(body.filename || 'upload').slice(0, 200),
-          status: 'previewed', rowCount: plan.length, summary: { ...summary, defaults }, rows: plan
-        }
-      });
-      await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'import.preview', meta: { importId: record.id, filename: record.filename, ...summary } });
-      return { importId: record.id, summary, rows: plan };
+      return previewImportCtx(await context(actorUserId), body);
     },
-
-    /**
-     * Applies a previewed import. State is re-planned from the stored INPUT
-     * rows so that anything that changed since the preview (a seat taken, an
-     * account created) is handled correctly, all in one transaction. Rows that
-     * became errors are skipped and reported. Invite emails go out after commit.
-     */
+    async adminPreviewImport(orgId, actorAdminId, body) {
+      return previewImportCtx(await adminContext(orgId, actorAdminId), body);
+    },
     async commitImport(actorUserId, importIdRaw) {
-      const ctx = await context(actorUserId);
-      const importId = toId(importIdRaw);
-      const rec = await q(IMPORT).findOne({ where: { id: importId }, populate: { organization: { select: ['id'] } } });
-      if (!rec || rec.organization?.id !== ctx.orgId) throw new OrgError(404, 'Import not found');
-      if (rec.status !== 'previewed') throw new OrgError(409, `This import is already ${rec.status}`);
-      if (Date.now() - new Date(rec.createdAt).getTime() > IMPORT_TTL_HOURS * 3600000) {
-        await q(IMPORT).update({ where: { id: importId }, data: { status: 'expired' } });
-        throw new OrgError(409, 'This preview is more than a day old. Upload the file again.');
-      }
-
-      // Claim it. Only one concurrent commit can flip previewed -> committing.
-      const claimed = await q(IMPORT).updateMany({ where: { id: importId, status: 'previewed' }, data: { status: 'committing' } });
-      if (!claimed?.count) throw new OrgError(409, 'This import is already being applied');
-
-      const storedRows = Array.isArray(rec.rows) ? rec.rows : [];
-      const defaults = rec.summary?.defaults || {};
-      // Re-plan from the original inputs: the preview's start/end are kept by
-      // passing them as explicit dates, so clipping decisions don't move.
-      const inputs = storedRows.map((r) => ({
-        row: r.row, email: r.email, displayName: r.displayName, phone: r.phone,
-        coverageStart: r.start || null, coverageEnd: r.end || null
-      }));
-
-      const invites = [];
-      const counts = { created: 0, added: 0, extended: 0, unchanged: 0, skipped: 0 };
-      let finalPlan;
-      try {
-        await strapi.db.transaction(async () => {
-          const { plan } = await planRows(ctx, inputs, defaults);
-          finalPlan = plan;
-          for (const p of plan) {
-            if (p.action === 'error') { counts.skipped++; continue; }
-            let userId = p.userId;
-            if (p.action === 'new_user') {
-              const created = await createInvitedUser({ email: p.email, displayName: p.displayName, phone: p.phone, accountSource: 'org_import' });
-              userId = created.user.id;
-              invites.push({ email: p.email, displayName: p.displayName, token: created.inviteToken });
-              await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'member.invite', targetUserId: userId, targetEmail: p.email, meta: { importId } });
-            }
-            if (p.action === 'new_user' || p.action === 'add_existing') {
-              await q(SEAT).create({
-                data: { organization: ctx.orgId, user: userId, role: 'member', status: 'active', source: 'import', addedBy: ctx.actorUserId }
-              });
-              await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'member.add', targetUserId: userId, targetEmail: p.email, meta: { importId } });
-              if (p.action === 'new_user') counts.created++; else counts.added++;
-            }
-            const res = await applyWindow({
-              orgId: ctx.orgId, userId, email: p.email, start: p.start, end: p.end, actorUserId: ctx.actorUserId, source: 'import'
-            });
-            if (p.action === 'extend') {
-              if (res.action === 'unchanged') counts.unchanged++; else counts.extended++;
-            }
-          }
-        });
-      } catch (err) {
-        await q(IMPORT).update({ where: { id: importId }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000) } });
-        await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'import.fail', meta: { importId, error: String(err.message || err).slice(0, 300) } });
-        throw err.status ? err : new OrgError(500, 'The import could not be applied. Nothing was changed.');
-      }
-
-      await q(IMPORT).update({
-        where: { id: importId },
-        data: { status: 'committed', committedAt: new Date(), rows: finalPlan, summary: { ...rec.summary, result: counts } }
-      });
-      await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'import.commit', meta: { importId, ...counts, invites: invites.length } });
-
-      // Fire-and-forget: a large import shouldn't hold the request open while
-      // hundreds of emails go out. Failures are logged; "Resend invite" on the
-      // member row covers anyone who didn't receive one.
-      if (invites.length) {
-        (async () => {
-          let sent = 0;
-          for (const inv of invites) {
-            if (await sendInvite({ ...inv, orgName: ctx.org.name, inviterName: ctx.actorName })) sent++;
-          }
-          strapi.log.info(`[org-members] import ${importId}: ${sent}/${invites.length} invite emails sent`);
-        })();
-      }
-
-      return { importId, result: counts, invitesQueued: invites.length, rows: finalPlan };
+      return commitImportCtx(await context(actorUserId), importIdRaw);
+    },
+    async adminCommitImport(orgId, actorAdminId, importIdRaw) {
+      return commitImportCtx(await adminContext(orgId, actorAdminId), importIdRaw);
+    },
+    async exportMembers(actorUserId) {
+      return exportMembersCtx(await context(actorUserId));
+    },
+    async adminExportMembers(orgId, actorAdminId) {
+      return exportMembersCtx(await adminContext(orgId, actorAdminId));
     },
 
     // ---- invite acceptance (no Org Admin involved) -----------------------
@@ -781,4 +725,162 @@ module.exports = ({ strapi }) => {
       return { success: true, user: userService().toPublicProfile(updated), tokenVersion: updated.tokenVersion };
     }
   };
+
+  // ---- import / export internals (ctx = Org Admin or handle admin) ---------
+
+  async function previewImportCtx(ctx, body) {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!rows.length) throw new OrgError(400, 'The file has no rows');
+    if (rows.length > MAX_IMPORT_ROWS) throw new OrgError(400, `The file has ${rows.length} rows; the limit is ${MAX_IMPORT_ROWS}`);
+    const defaults = body.defaults || {};
+
+    const { plan, summary } = await planRows(ctx, rows, defaults);
+    const record = await q(IMPORT).create({
+      data: {
+        organization: ctx.orgId, uploadedBy: ctx.actorUserId, uploadedByAdmin: ctx.actorAdminId, filename: String(body.filename || 'upload').slice(0, 200),
+        status: 'previewed', rowCount: plan.length, summary: { ...summary, defaults }, rows: plan
+      }
+    });
+    await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'import.preview', meta: { importId: record.id, filename: record.filename, ...summary } });
+    return { importId: record.id, summary, rows: plan };
+  }
+
+  /**
+   * Applies a previewed import. State is re-planned from the stored INPUT
+   * rows so that anything that changed since the preview (a seat taken, an
+   * account created) is handled correctly, all in one transaction. Rows that
+   * became errors are skipped and reported. Invite emails go out after commit.
+   */
+  async function commitImportCtx(ctx, importIdRaw) {
+    const importId = toId(importIdRaw);
+    const rec = await q(IMPORT).findOne({ where: { id: importId }, populate: { organization: { select: ['id'] } } });
+    if (!rec || rec.organization?.id !== ctx.orgId) throw new OrgError(404, 'Import not found');
+    if (rec.status !== 'previewed') throw new OrgError(409, `This import is already ${rec.status}`);
+    if (Date.now() - new Date(rec.createdAt).getTime() > IMPORT_TTL_HOURS * 3600000) {
+      await q(IMPORT).update({ where: { id: importId }, data: { status: 'expired' } });
+      throw new OrgError(409, 'This preview is more than a day old. Upload the file again.');
+    }
+
+    // Claim it. Only one concurrent commit can flip previewed -> committing.
+    const claimed = await q(IMPORT).updateMany({ where: { id: importId, status: 'previewed' }, data: { status: 'committing' } });
+    if (!claimed?.count) throw new OrgError(409, 'This import is already being applied');
+
+    const storedRows = Array.isArray(rec.rows) ? rec.rows : [];
+    const defaults = rec.summary?.defaults || {};
+    // Re-plan from the original inputs: the preview's start/end are kept by
+    // passing them as explicit dates, so clipping decisions don't move.
+    const inputs = storedRows.map((r) => ({
+      row: r.row, email: r.email, displayName: r.displayName, phone: r.phone,
+      coverageStart: r.start || null, coverageEnd: r.end || null
+    }));
+
+    const invites = [];
+    const counts = { created: 0, added: 0, extended: 0, unchanged: 0, kept: 0, skipped: 0 };
+    let finalPlan;
+    try {
+      await strapi.db.transaction(async () => {
+        const { plan } = await planRows(ctx, inputs, defaults);
+        finalPlan = plan;
+        for (const p of plan) {
+          if (p.action === 'error') { counts.skipped++; continue; }
+          if (p.action === 'keep') { counts.kept++; continue; }
+          let userId = p.userId;
+          if (p.action === 'new_user') {
+            const created = await createInvitedUser({ email: p.email, displayName: p.displayName, phone: p.phone, accountSource: 'org_import' });
+            userId = created.user.id;
+            invites.push({ email: p.email, displayName: p.displayName, token: created.inviteToken });
+            await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'member.invite', targetUserId: userId, targetEmail: p.email, meta: { importId } });
+          }
+          if (p.action === 'new_user' || p.action === 'add_existing') {
+            await q(SEAT).create({
+              data: {
+                organization: ctx.orgId, user: userId, role: 'member', status: 'active', source: 'import',
+                addedBy: ctx.actorUserId, addedByAdmin: ctx.actorAdminId
+              }
+            });
+            await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'member.add', targetUserId: userId, targetEmail: p.email, meta: { importId } });
+            if (p.action === 'new_user') counts.created++; else counts.added++;
+          }
+          const res = await applyWindow({
+            orgId: ctx.orgId, userId, email: p.email, start: p.start, end: p.end, ...actorOf(ctx), source: 'import'
+          });
+          if (p.action === 'extend') {
+            if (res.action === 'unchanged') counts.unchanged++; else counts.extended++;
+          }
+        }
+      });
+    } catch (err) {
+      await q(IMPORT).update({ where: { id: importId }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000) } });
+      await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'import.fail', meta: { importId, error: String(err.message || err).slice(0, 300) } });
+      throw err.status ? err : new OrgError(500, 'The import could not be applied. Nothing was changed.');
+    }
+
+    await q(IMPORT).update({
+      where: { id: importId },
+      data: { status: 'committed', committedAt: new Date(), rows: finalPlan, summary: { ...rec.summary, result: counts } }
+    });
+    await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'import.commit', meta: { importId, ...counts, invites: invites.length } });
+
+    // Fire-and-forget: a large import shouldn't hold the request open while
+    // hundreds of emails go out. Failures are logged; "Resend invite" on the
+    // member row covers anyone who didn't receive one.
+    if (invites.length) {
+      (async () => {
+        let sent = 0;
+        for (const inv of invites) {
+          if (await sendInvite({ ...inv, orgName: ctx.org.name, inviterName: ctx.actorName })) sent++;
+        }
+        strapi.log.info(`[org-members] import ${importId}: ${sent}/${invites.length} invite emails sent`);
+      })();
+    }
+
+    return { importId, result: counts, invitesQueued: invites.length, rows: finalPlan };
+  }
+
+  /** Current members as plain rows for the downloadable spreadsheet. */
+  async function exportMembersCtx(ctx) {
+    const today = todayIso();
+    const seats = await q(SEAT).findMany({
+      where: { organization: { id: ctx.orgId } },
+      orderBy: { assignedAt: 'asc' },
+      populate: { user: { select: ['id', 'email', 'displayName', 'phone', 'accountSource', 'passwordSetAt'] } }
+    });
+    const userIds = seats.map((s) => s.user?.id).filter(Boolean);
+    const windows = userIds.length
+      ? await q(ENT).findMany({
+          where: { organization: { id: ctx.orgId }, scope: 'org_member', revokedAt: { $null: true }, user: { id: { $in: userIds } } },
+          select: ['coverageStart', 'coverageEnd'],
+          populate: { user: { select: ['id'] } }
+        })
+      : [];
+    const byUser = new Map();
+    for (const w of windows) {
+      const list = byUser.get(w.user?.id) || [];
+      list.push(w);
+      byUser.set(w.user?.id, list);
+    }
+    const members = seats.filter((s) => s.user).map((s) => {
+      const list = byUser.get(s.user.id) || [];
+      const current = list.find((w) => w.coverageStart <= today && today <= w.coverageEnd);
+      const latestEnd = list.reduce((m, w) => (w.coverageEnd > m ? w.coverageEnd : m), '') || null;
+      return {
+        email: s.user.email,
+        displayName: s.user.displayName || '',
+        phone: s.user.phone || '',
+        role: s.role || 'member',
+        status: seatStatusOf(s),
+        accessEnds: s.source === 'legacy' ? 'whole paid period' : (current ? current.coverageEnd : latestEnd),
+        inviteAccepted: !(['org_invite', 'org_import'].includes(s.user.accountSource) && !s.user.passwordSetAt)
+      };
+    });
+    const merged = mergeRanges(await contractRows(ctx.orgId));
+    const paid = merged.find((r) => r.start <= today && today <= r.end) || merged.find((r) => r.start > today) || null;
+    return { organisation: { id: ctx.orgId, name: ctx.org.name }, paidUntil: paid?.end || null, members };
+  }
+
+  function actorOf(ctx) {
+    return { actorUserId: ctx.actorUserId || null, actorAdminId: ctx.actorAdminId || null };
+  }
+
+  return api;
 };

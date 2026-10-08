@@ -2,7 +2,7 @@
 
 /**
  * apps/cms/src/api/org-management/routes/org-management-routes.js
- * NEW FILE — Phase 2
+ * NEW FILE — Phase 2. UPDATED: members/export and imports.
  *
  * There is no content type behind this API, only a controller (org-handle)
  * and a service (org-store). None of these routes is auth:false. They need
@@ -32,6 +32,10 @@ module.exports = {
     { method: 'GET', path: '/org-management/orgs/:id/members', handler: `${C}.listMembers` },
     { method: 'POST', path: '/org-management/orgs/:id/members/:seatId/status', handler: `${C}.setMemberStatus` },
 
-    { method: 'GET', path: '/org-management/orgs/:id/audit', handler: `${C}.listAudit` }
+    { method: 'GET', path: '/org-management/orgs/:id/audit', handler: `${C}.listAudit` },
+
+    { method: 'GET', path: '/org-management/orgs/:id/members/export', handler: `${C}.exportMembers` },
+    { method: 'POST', path: '/org-management/orgs/:id/imports', handler: `${C}.previewImport` },
+    { method: 'POST', path: '/org-management/orgs/:id/imports/:importId/commit', handler: `${C}.commitImport` }
   ]
 };

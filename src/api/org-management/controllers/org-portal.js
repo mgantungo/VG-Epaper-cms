@@ -2,7 +2,7 @@
 
 /**
  * apps/cms/src/api/org-management/controllers/org-portal.js
- * NEW FILE — Phase 3
+ * NEW FILE — Phase 3. UPDATED: exportMembers (spreadsheet download of current members).
  *
  * HTTP layer for the Org Admin dashboard (web app /organisation) and for
  * invite acceptance. Reachable only with STRAPI_API_TOKEN, i.e. from the
@@ -46,6 +46,7 @@ module.exports = ({ strapi }) => {
   return {
     summary: handle('summary', (ctx) => svc().summary(actorUserId(ctx))),
     listMembers: handle('listMembers', (ctx) => svc().listMembers(actorUserId(ctx), ctx.query || {})),
+    exportMembers: handle('exportMembers', (ctx) => svc().exportMembers(actorUserId(ctx))),
     addMember: handle('addMember', async (ctx) => {
       const out = await svc().addMember(actorUserId(ctx), body(ctx));
       ctx.status = 201;

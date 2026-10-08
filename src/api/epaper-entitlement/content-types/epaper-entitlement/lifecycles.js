@@ -2,13 +2,16 @@
 
 /**
  * apps/cms/src/api/epaper-entitlement/content-types/epaper-entitlement/lifecycles.js
- * NEW FILE (if one already exists, merge these two hooks into it)
+ * Phase 1 file, UPDATED in Phase 2: anything paid through a transaction
+ * that carries an organization counts as org_contract, even when it also
+ * records the paying user.
  *
  * Derives `scope` when the caller doesn't send one, so every existing
  * creator (epaper-transaction's grantEntitlement) keeps working untouched:
- *   organization + no user  -> org_contract
- *   organization + user     -> org_member
- *   anything else           -> personal
+ *   organization + transaction -> org_contract   (an org purchase; `user` is just the payer)
+ *   organization + no user     -> org_contract
+ *   organization + user        -> org_member
+ *   anything else              -> personal
  * It also enforces coverageStart <= coverageEnd for every writer.
  *
  * Relations can arrive as a number, { id }, { connect: [...] } or
@@ -47,7 +50,8 @@ module.exports = {
     } else {
       const hasOrg = hasRelation(data.organization);
       const hasUser = hasRelation(data.user);
-      data.scope = hasOrg ? (hasUser ? 'org_member' : 'org_contract') : 'personal';
+      const hasTxn = hasRelation(data.transaction);
+      data.scope = hasOrg ? (hasTxn || !hasUser ? 'org_contract' : 'org_member') : 'personal';
     }
 
     if (!data.grantSource && hasRelation(data.transaction)) data.grantSource = 'purchase';

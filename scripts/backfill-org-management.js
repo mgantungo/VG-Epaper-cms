@@ -2,7 +2,7 @@
 
 /**
  * apps/cms/scripts/backfill-org-management.js
- * NEW FILE — Phase 1 of organisation management
+ * Phase 1 file, UPDATED in Phase 2 (an org row with a transaction counts as org_contract)
  *
  * Fills the new fields on rows that existed before the schema change.
  * Strapi adds new columns as NULL on existing rows; it does not apply
@@ -12,7 +12,7 @@
  *   epaper-org-seat      status        <- from `active`
  *                        role          <- 'admin' if the seat's user is the org's owner, else 'member'
  *                        source        <- 'legacy'
- *   epaper-entitlement   scope         <- org+no user: org_contract | org+user: org_member | else: personal
+ *   epaper-entitlement   scope         <- org+transaction or org+no user: org_contract | org+user: org_member | else: personal
  *                        grantSource   <- 'purchase' when linked to a transaction
  *   epaper-user          accountSource <- 'self_registered'
  *   handle-admin         canManageEditions=true, canManageOrganizations=false, isSuperAdmin=false
@@ -80,19 +80,19 @@ async function backfillEntitlements(strapi) {
     select: ['id', 'scope', 'grantSource'],
     populate: { user: { select: ['id'] }, organization: { select: ['id'] }, transaction: { select: ['id'] } }
   });
-  const counts = { personal: 0, org_contract: 0, org_member: 0 };
+  const counts = { changed: 0, personal: 0, org_contract: 0, org_member: 0 };
   for (const row of rows) {
     const data = {};
     if (!row.scope) {
-      data.scope = row.organization ? (row.user ? 'org_member' : 'org_contract') : 'personal';
+      data.scope = row.organization ? (row.transaction || !row.user ? 'org_contract' : 'org_member') : 'personal';
       counts[data.scope]++;
     }
     if (!row.grantSource && row.transaction) data.grantSource = 'purchase';
-    if (Object.keys(data).length && APPLY) {
-      await strapi.db.query(ENT).update({ where: { id: row.id }, data });
-    }
+    if (!Object.keys(data).length) continue; // grantSource legitimately stays empty without a transaction
+    counts.changed++;
+    if (APPLY) await strapi.db.query(ENT).update({ where: { id: row.id }, data });
   }
-  return { total: rows.length, ...counts };
+  return counts;
 }
 
 async function backfillUsers(strapi) {

@@ -4,7 +4,8 @@
   "info": {
     "singularName": "epaper-organization",
     "pluralName": "epaper-organizations",
-    "displayName": "Epaper Organization"
+    "displayName": "Epaper Organization",
+    "description": "A master account (e.g. Parliament of Uganda) paying centrally for named member seats. `status` is the source of truth; `active` is kept in sync by lifecycles.js for any older code still reading it."
   },
   "options": {
     "draftAndPublish": false
@@ -23,6 +24,38 @@
     "active": {
       "type": "boolean",
       "default": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["active", "suspended", "archived"],
+      "default": "active"
+    },
+    "seatLimit": {
+      "type": "integer",
+      "min": 0
+    },
+    "contactName": {
+      "type": "string"
+    },
+    "contactEmail": {
+      "type": "email"
+    },
+    "contactPhone": {
+      "type": "string"
+    },
+    "suspendedAt": {
+      "type": "datetime"
+    },
+    "suspendedReason": {
+      "type": "text"
+    },
+    "notes": {
+      "type": "text"
+    },
+    "createdByAdmin": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::handle-admin.handle-admin"
     },
     "seats": {
       "type": "relation",

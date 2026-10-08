@@ -1,0 +1,54 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_org_imports",
+  "info": {
+    "singularName": "epaper-org-import",
+    "pluralName": "epaper-org-imports",
+    "displayName": "Epaper Org Import",
+    "description": "One Excel/CSV member upload by an Org Admin (or a handle admin acting for an org). Created at preview time holding the parsed row-by-row plan; committing applies exactly that stored plan, never a re-upload, so what the admin confirmed is what gets written."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "organization": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-organization.epaper-organization"
+    },
+    "uploadedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "uploadedByAdmin": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::handle-admin.handle-admin"
+    },
+    "filename": {
+      "type": "string"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["previewed", "committing", "committed", "failed", "expired"],
+      "default": "previewed"
+    },
+    "rowCount": {
+      "type": "integer"
+    },
+    "summary": {
+      "type": "json"
+    },
+    "rows": {
+      "type": "json"
+    },
+    "committedAt": {
+      "type": "datetime"
+    },
+    "error": {
+      "type": "text"
+    }
+  }
+}

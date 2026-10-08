@@ -1,0 +1,53 @@
+{
+  "kind": "collectionType",
+  "collectionName": "epaper_org_audits",
+  "info": {
+    "singularName": "epaper-org-audit",
+    "pluralName": "epaper-org-audits",
+    "displayName": "Epaper Org Audit",
+    "description": "Append-only log of every change to an organization, its seats or its access windows, made by either an Org Admin (actorUser) or a handle admin (actorAdmin). The router exposes no update or delete."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "organization": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-organization.epaper-organization"
+    },
+    "actorUser": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "actorAdmin": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::handle-admin.handle-admin"
+    },
+    "action": {
+      "type": "enumeration",
+      "enum": [
+        "org.create", "org.update", "org.suspend", "org.reactivate", "org.archive",
+        "contract.create", "contract.extend", "contract.revoke",
+        "member.add", "member.invite", "member.suspend", "member.reactivate", "member.remove",
+        "member.role", "access.create", "access.extend", "access.revoke",
+        "import.preview", "import.commit", "import.fail"
+      ],
+      "required": true
+    },
+    "targetUser": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "targetEmail": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "json"
+    }
+  }
+}

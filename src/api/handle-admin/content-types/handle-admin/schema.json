@@ -39,6 +39,21 @@
       "private": true,
       "description": "Bumped on every successful login — embedded in the issued JWT, so an older token for this admin can be invalidated (e.g. by an admin forcing re-login) by bumping this without needing a token blocklist."
     },
-    "lastLoginAt": { "type": "datetime" }
+    "lastLoginAt": { "type": "datetime" },
+    "canManageEditions": {
+      "type": "boolean",
+      "default": true,
+      "description": "Edition ingest + story editor. A null value (rows that existed before this field) is treated as TRUE, so existing editors keep working."
+    },
+    "canManageOrganizations": {
+      "type": "boolean",
+      "default": false,
+      "description": "The extra right needed for Organisations in handle: create, suspend or archive orgs, set seat limits, grant contracts, assign Org Admins. A null value is treated as FALSE."
+    },
+    "isSuperAdmin": {
+      "type": "boolean",
+      "default": false,
+      "description": "Implies every other right, and can change other handle admins' rights. A null value is treated as FALSE."
+    }
   }
 }

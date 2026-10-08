@@ -5,7 +5,7 @@
     "singularName": "epaper-user",
     "pluralName": "epaper-users",
     "displayName": "Epaper User",
-    "description": "The real identity/credential store for epaper readers — replaces plugin::users-permissions.user for this app. passwordHash never leaves this content-type's own controller; see services/epaper-user.js."
+    "description": "The real identity/credential store for epaper readers — replaces plugin::users-permissions.user for this app. passwordHash never leaves this content-type's own controller; see services/epaper-user.js. Users added by an Org Admin are created with an unusable random passwordHash plus a pending invite (inviteTokenHash/inviteExpiresAt), and set their real password through the invite link."
   },
   "options": {
     "draftAndPublish": false
@@ -36,6 +36,24 @@
       "type": "integer",
       "default": 0,
       "private": true
+    },
+    "accountSource": {
+      "type": "enumeration",
+      "enum": ["self_registered", "org_invite", "org_import"]
+    },
+    "inviteTokenHash": {
+      "type": "string",
+      "private": true
+    },
+    "inviteExpiresAt": {
+      "type": "datetime",
+      "private": true
+    },
+    "invitedAt": {
+      "type": "datetime"
+    },
+    "passwordSetAt": {
+      "type": "datetime"
     }
   }
 }

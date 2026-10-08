@@ -4,7 +4,8 @@
   "info": {
     "singularName": "epaper-org-seat",
     "pluralName": "epaper-org-seats",
-    "displayName": "Epaper Org Seat"
+    "displayName": "Epaper Org Seat",
+    "description": "One named member of an organization. `status` is the source of truth; `active` is kept in sync by lifecycles.js. role=admin makes the holder an Org Admin for that organization. `user` stays oneToOne: a reader belongs to at most one organization at a time."
   },
   "options": {
     "draftAndPublish": false
@@ -26,8 +27,38 @@
       "type": "boolean",
       "default": true
     },
+    "status": {
+      "type": "enumeration",
+      "enum": ["active", "suspended"],
+      "default": "active"
+    },
+    "role": {
+      "type": "enumeration",
+      "enum": ["member", "admin"],
+      "default": "member"
+    },
     "assignedAt": {
       "type": "datetime"
+    },
+    "suspendedAt": {
+      "type": "datetime"
+    },
+    "suspendedReason": {
+      "type": "text"
+    },
+    "source": {
+      "type": "enumeration",
+      "enum": ["manual", "import", "handle", "legacy"]
+    },
+    "addedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::epaper-user.epaper-user"
+    },
+    "addedByAdmin": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::handle-admin.handle-admin"
     }
   }
 }

@@ -135,5 +135,13 @@ module.exports = {
     });
   },
 
-  bootstrap(/*{ strapi }*/) {}
+  async bootstrap({ strapi }) {
+    // Idempotent: creates FULLTEXT indexes on stories.headline / stories.body if missing.
+    // Runs after Strapi's schema sync. Never blocks startup if it fails.
+    try {
+      await strapi.service('api::story.story-search').ensureFulltextIndexes();
+    } catch (err) {
+      strapi.log.error(`[story-search] bootstrap index check failed: ${err.message}`);
+    }
+  }
 };

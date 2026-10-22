@@ -59,7 +59,8 @@ class OrgError extends Error {
 
 // ---- dates (all YYYY-MM-DD, UTC, same "today" as the middleware) -----------
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+// Kampala calendar day (see src/utils/epaper-dates.js).
+const todayIso = () => require('../../../utils/epaper-dates').kampalaToday();
 
 function isIsoDate(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
@@ -501,10 +502,15 @@ module.exports = ({ strapi }) => {
       const current = merged.find((r) => r.start <= today && today <= r.end) || null;
       const next = merged.find((r) => r.start > today) || null;
 
+      // Per publication: seats on the governing contract and seats in use.
+      // No amounts: what the organisation paid is New Vision's business.
+      const publications = await store().publicationSeatUse(ctx.orgId);
+
       return {
         organisation: { id: ctx.orgId, name: ctx.org.name, status: orgStatusOf(ctx.org) },
         you: { email: ctx.actorEmail, seatId: ctx.actorSeatId },
         seats: { inUse, suspended, limit: ctx.org.seatLimit ?? null },
+        publications,
         paidPeriod: { current, next, ranges: merged },
         expiringSoon,
         pendingInvites
@@ -521,7 +527,9 @@ module.exports = ({ strapi }) => {
       return store().listAudit(ctx.orgId, query || {});
     },
 
-    /** body: { email, displayName?, phone?, coverageStart?, coverageEnd?, months? } */
+    /** body: { email, displayName?, phone?, coverageStart?, coverageEnd?, months?,
+     *          publications? }  publications: codes; default = every paid
+     *          publication with a free seat */
     async addMember(actorUserId, body) {
       const ctx = await context(actorUserId);
       const email = normEmail(body.email);
@@ -557,9 +565,14 @@ module.exports = ({ strapi }) => {
           await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'member.invite', targetUserId: user.id, targetEmail: email });
         }
         const seat = await q(SEAT).create({
-          data: { organization: ctx.orgId, user: user.id, role: 'member', status: 'active', source: 'manual', addedBy: ctx.actorUserId }
+          data: {
+            organization: ctx.orgId, user: user.id, role: 'member', status: 'active', source: 'manual', addedBy: ctx.actorUserId,
+            publicationCodes: []
+          }
         });
         await audit({ orgId: ctx.orgId, actorUserId: ctx.actorUserId, action: 'member.add', targetUserId: user.id, targetEmail: email });
+        const wanted = Array.isArray(body.publications) ? body.publications : await store().defaultSeatPublications(ctx.orgId);
+        await store().setSeatPublications(ctx.orgId, seat.id, wanted, { actorUserId: ctx.actorUserId });
         const access = await applyWindow({
           orgId: ctx.orgId, userId: user.id, email, start: win.start, end: win.end,
           actorUserId: ctx.actorUserId, source: 'org_admin'
@@ -600,6 +613,7 @@ module.exports = ({ strapi }) => {
       if (status === 'active' && ctx.org.seatLimit !== null && ctx.org.seatLimit !== undefined) {
         if ((await activeSeatCount(ctx.orgId)) >= ctx.org.seatLimit) throw new OrgError(409, `All ${ctx.org.seatLimit} seats are in use`);
       }
+      if (status === 'active') await store().assertRoomForSeat(ctx.orgId, seat);
       const reason = String(body.reason || '').trim() || null;
       await q(SEAT).update({
         where: { id: seat.id },
@@ -657,6 +671,12 @@ module.exports = ({ strapi }) => {
         });
       });
       return { success: true };
+    },
+
+    /** body: { publications: ['NV', 'BK'] } — which paid publications this member reads. */
+    async setMemberPublications(actorUserId, seatId, body) {
+      const ctx = await context(actorUserId);
+      return store().setSeatPublications(ctx.orgId, seatId, body?.publications, { actorUserId: ctx.actorUserId });
     },
 
     async resendInvite(actorUserId, seatId) {
@@ -795,7 +815,10 @@ module.exports = ({ strapi }) => {
             await q(SEAT).create({
               data: {
                 organization: ctx.orgId, user: userId, role: 'member', status: 'active', source: 'import',
-                addedBy: ctx.actorUserId, addedByAdmin: ctx.actorAdminId
+                addedBy: ctx.actorUserId, addedByAdmin: ctx.actorAdminId,
+                // Spreadsheet columns per publication come in a follow-up; until
+                // then imported members get every paid publication with a free seat.
+                publicationCodes: await store().defaultSeatPublications(ctx.orgId)
               }
             });
             await audit({ orgId: ctx.orgId, ...actorOf(ctx), action: 'member.add', targetUserId: userId, targetEmail: p.email, meta: { importId } });
@@ -870,6 +893,10 @@ module.exports = ({ strapi }) => {
         role: s.role || 'member',
         status: seatStatusOf(s),
         accessEnds: s.source === 'legacy' ? 'whole paid period' : (current ? current.coverageEnd : latestEnd),
+        publications: (() => {
+          const codes = store().seatCodes(s);
+          return codes === null ? 'all' : (codes.length ? codes.join(', ') : 'none');
+        })(),
         inviteAccepted: !(['org_invite', 'org_import'].includes(s.user.accountSource) && !s.user.passwordSetAt)
       };
     });

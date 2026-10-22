@@ -4,7 +4,8 @@
   "info": {
     "singularName": "epaper-plan",
     "pluralName": "epaper-plans",
-    "displayName": "Epaper Plan"
+    "displayName": "Epaper Plan",
+    "description": "A standard price readers pay. Managed from handle (Publications > Plans and prices). `key` names the plan; each price change is a new row with the same key and the next version, valid from its validFrom date, so past sales keep the price they were sold at. Organisations are NOT sold plans: their contracts are priced by hand per publication (org-management)."
   },
   "options": {
     "draftAndPublish": false
@@ -14,19 +15,44 @@
     "key": {
       "type": "string",
       "required": true,
-      "unique": true
+      "description": "Stable plan name, e.g. nv_month. Shared by all versions of the plan; not unique."
+    },
+    "version": {
+      "type": "integer",
+      "default": 1,
+      "required": true
     },
     "label": {
       "type": "string",
-      "required": true
+      "required": true,
+      "description": "Name readers see."
+    },
+    "description": {
+      "type": "text"
     },
     "kind": {
       "type": "enumeration",
-      "enum": ["daily", "period_subscription", "single_archive", "all_archive_access"],
-      "required": true
+      "enum": [
+        "period",
+        "single_issue"
+      ],
+      "required": true,
+      "description": "period: every edition of the included publications whose cover dates fall in [start, start + duration). single_issue: one chosen edition (exactly one publication)."
     },
-    "durationDays": {
-      "type": "integer"
+    "durationUnit": {
+      "type": "enumeration",
+      "enum": [
+        "day",
+        "week",
+        "month",
+        "year"
+      ],
+      "default": "month"
+    },
+    "durationCount": {
+      "type": "integer",
+      "default": 1,
+      "min": 1
     },
     "price": {
       "type": "biginteger",
@@ -36,13 +62,31 @@
       "type": "string",
       "default": "UGX"
     },
+    "publications": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::publication.publication",
+      "inversedBy": "plans"
+    },
+    "revenueSplit": {
+      "type": "json",
+      "description": "{ \"NV\": 78, \"NVW\": 22 } — percent of the price credited to each publication in reports. Must total 100. Empty = suggested from each publication's own price at the time of sale."
+    },
     "active": {
       "type": "boolean",
-      "default": true
+      "default": true,
+      "description": "On sale. 'Stop selling' in handle sets this false on every version."
     },
-    "allowsOrgPurchase": {
+    "featured": {
       "type": "boolean",
-      "default": false
+      "default": true,
+      "description": "Shown on the reader landing page."
+    },
+    "validFrom": {
+      "type": "date"
+    },
+    "validTo": {
+      "type": "date"
     },
     "sortOrder": {
       "type": "integer",

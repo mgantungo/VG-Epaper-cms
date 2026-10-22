@@ -7,28 +7,71 @@
     "displayName": "Edition",
     "description": "One published day's newspaper. The source PDF is uploaded here; pages/stories are generated from it by the ingest service."
   },
-  "options": { "draftAndPublish": true },
+  "options": {
+    "draftAndPublish": true
+  },
   "attributes": {
-    "date": { "type": "date", "required": true, "unique": true },
-    "volume": { "type": "string" },
-    "issueNumber": { "type": "string" },
-    "coverPrice": { "type": "decimal", "default": 500 },
-    "currency": { "type": "string", "default": "UGX" },
-    "pageCount": { "type": "integer", "description": "Filled in automatically once the PDF is processed" },
+    "date": {
+      "type": "date",
+      "required": true,
+      "description": "The date printed on the edition. NOT unique on its own any more: New Vision and Bukedde both publish on the same date. The pair (publication, date) is unique, enforced in src/index.js."
+    },
+    "publication": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::publication.publication",
+      "inversedBy": "editions"
+    },
+    "coversFrom": {
+      "type": "date",
+      "description": "First day this edition covers. Filled in automatically from the date and the publication's coverDays."
+    },
+    "coversTo": {
+      "type": "date",
+      "description": "Last day this edition covers (a weekend edition dated Saturday covers to Sunday). Filled in automatically."
+    },
+    "volume": {
+      "type": "string"
+    },
+    "issueNumber": {
+      "type": "string"
+    },
+    "coverPrice": {
+      "type": "decimal",
+      "default": 500
+    },
+    "currency": {
+      "type": "string",
+      "default": "UGX"
+    },
+    "pageCount": {
+      "type": "integer",
+      "description": "Filled in automatically once the PDF is processed"
+    },
     "sourcePdf": {
       "type": "media",
       "multiple": false,
       "required": false,
-      "allowedTypes": ["files"],
+      "allowedTypes": [
+        "files"
+      ],
       "description": "The original print-ready PDF for this edition. Uploading/replacing this re-triggers the ingest pipeline."
     },
     "pipelineStatus": {
       "type": "enumeration",
-      "enum": ["pending", "processing", "ready_for_review", "published", "failed"],
+      "enum": [
+        "pending",
+        "processing",
+        "ready_for_review",
+        "published",
+        "failed"
+      ],
       "default": "pending",
       "description": "pending: no PDF yet. processing: ingest service is rasterizing/extracting. ready_for_review: pages + draft story hotspots created, needs an editor to review before going live. published: reviewed and live. failed: see pipelineError."
     },
-    "pipelineError": { "type": "text" },
+    "pipelineError": {
+      "type": "text"
+    },
     "pages": {
       "type": "relation",
       "relation": "oneToMany",
@@ -42,7 +85,7 @@
     "publicationCode": {
       "type": "string",
       "default": "NV",
-      "description": "Constant per paper (e.g. 'NV' for New Vision) — a fixed default is all this needs while there's only one publication on this platform. Exists now so adding a second paper later doesn't require another schema migration; the SKU below is what actually needs it to stay unambiguous."
+      "description": "Copy of publication.code, kept in sync automatically (src/index.js) because the SKU, ingest and older queries read it. Set the publication relation, or send just this code and the relation is filled in."
     },
     "sku": {
       "type": "string",

@@ -70,6 +70,9 @@ module.exports = ({ strapi }) => {
     setMemberStatus: handle('setMemberStatus', (ctx) =>
       svc().setMemberStatus(ctx.params.id, ctx.params.seatId, ctx.request.body || {}, actorAdminId(ctx))),
 
+    setMemberPublications: handle('setMemberPublications', (ctx) =>
+      svc().setSeatPublications(ctx.params.id, ctx.params.seatId, (ctx.request.body || {}).publications, { actorAdminId: actorAdminId(ctx) })),
+
     listAudit: handle('listAudit', (ctx) => svc().listAudit(ctx.params.id, ctx.query || {})),
 
     // Spreadsheet round-trip for a handle admin acting on one organisation.

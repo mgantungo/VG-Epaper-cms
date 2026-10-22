@@ -22,6 +22,7 @@ module.exports = {
     { method: 'POST', path: '/org-management/portal/members/:seatId/role', handler: `${C}.setRole` },
     { method: 'POST', path: '/org-management/portal/members/:seatId/remove', handler: `${C}.removeMember` },
     { method: 'POST', path: '/org-management/portal/members/:seatId/resend-invite', handler: `${C}.resendInvite` },
+    { method: 'POST', path: '/org-management/portal/members/:seatId/publications', handler: `${C}.setMemberPublications` },
     { method: 'POST', path: '/org-management/portal/imports', handler: `${C}.previewImport` },
     { method: 'POST', path: '/org-management/portal/imports/:importId/commit', handler: `${C}.commitImport` },
     { method: 'GET', path: '/org-management/portal/audit', handler: `${C}.listAudit` },

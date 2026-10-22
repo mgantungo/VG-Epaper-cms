@@ -31,6 +31,7 @@ module.exports = {
 
     { method: 'GET', path: '/org-management/orgs/:id/members', handler: `${C}.listMembers` },
     { method: 'POST', path: '/org-management/orgs/:id/members/:seatId/status', handler: `${C}.setMemberStatus` },
+    { method: 'POST', path: '/org-management/orgs/:id/members/:seatId/publications', handler: `${C}.setMemberPublications` },
 
     { method: 'GET', path: '/org-management/orgs/:id/audit', handler: `${C}.listAudit` },
 

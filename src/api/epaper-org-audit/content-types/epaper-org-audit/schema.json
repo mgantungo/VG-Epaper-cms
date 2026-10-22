@@ -30,11 +30,27 @@
     "action": {
       "type": "enumeration",
       "enum": [
-        "org.create", "org.update", "org.suspend", "org.reactivate", "org.archive",
-        "contract.create", "contract.extend", "contract.revoke",
-        "member.add", "member.invite", "member.suspend", "member.reactivate", "member.remove",
-        "member.role", "access.create", "access.extend", "access.revoke",
-        "import.preview", "import.commit", "import.fail"
+        "org.create",
+        "org.update",
+        "org.suspend",
+        "org.reactivate",
+        "org.archive",
+        "contract.create",
+        "contract.extend",
+        "contract.revoke",
+        "member.add",
+        "member.invite",
+        "member.suspend",
+        "member.reactivate",
+        "member.remove",
+        "member.role",
+        "member.publications",
+        "access.create",
+        "access.extend",
+        "access.revoke",
+        "import.preview",
+        "import.commit",
+        "import.fail"
       ],
       "required": true
     },

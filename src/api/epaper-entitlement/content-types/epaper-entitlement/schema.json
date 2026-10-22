@@ -5,7 +5,7 @@
     "singularName": "epaper-entitlement",
     "pluralName": "epaper-entitlements",
     "displayName": "Epaper Entitlement",
-    "description": "One access window. scope: personal = a reader's own purchase; org_contract = what an organization has paid for (organization set, user empty); org_member = an Org Admin's grant to one member, which must sit inside an org_contract window. scope is derived in lifecycles.js when the caller doesn't send it, so epaper-transaction needs no changes. A row with revokedAt set grants nothing."
+    "description": "One access window. scope: personal = a reader's own purchase; org_contract = what an organization has paid for (organization set, user empty); org_member = an Org Admin's grant to one member, which must sit inside an org_contract window. scope is derived in lifecycles.js when the caller doesn't send it, so epaper-transaction needs no changes. A row with revokedAt set grants nothing. Every row opens exactly ONE publication (publication). A bundle purchase therefore creates one row per publication, and an organisation contract has one row per publication with its own seats and amount."
   },
   "options": {
     "draftAndPublish": false
@@ -28,6 +28,18 @@
       "relation": "manyToOne",
       "target": "api::epaper-plan.epaper-plan"
     },
+    "publication": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::publication.publication",
+      "description": "The one publication this row opens."
+    },
+    "edition": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::edition.edition",
+      "description": "Set for single_issue purchases: the exact edition bought."
+    },
     "coverageStart": {
       "type": "date",
       "required": true
@@ -38,6 +50,18 @@
     },
     "amountPaid": {
       "type": "biginteger"
+    },
+    "amountAllocated": {
+      "type": "biginteger",
+      "description": "This publication's share of the payment, frozen at sale (bundle split) or entered by hand (organisation contract line). Revenue reports sum this."
+    },
+    "seats": {
+      "type": "integer",
+      "description": "org_contract rows only: seats paid for on this publication."
+    },
+    "reference": {
+      "type": "string",
+      "description": "org_contract rows only: invoice / LPO reference."
     },
     "currency": {
       "type": "string",
@@ -51,11 +75,20 @@
     },
     "scope": {
       "type": "enumeration",
-      "enum": ["personal", "org_contract", "org_member"]
+      "enum": [
+        "personal",
+        "org_contract",
+        "org_member"
+      ]
     },
     "grantSource": {
       "type": "enumeration",
-      "enum": ["purchase", "org_admin", "import", "handle"]
+      "enum": [
+        "purchase",
+        "org_admin",
+        "import",
+        "handle"
+      ]
     },
     "grantedByUser": {
       "type": "relation",

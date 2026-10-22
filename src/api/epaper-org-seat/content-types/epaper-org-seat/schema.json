@@ -29,12 +29,18 @@
     },
     "status": {
       "type": "enumeration",
-      "enum": ["active", "suspended"],
+      "enum": [
+        "active",
+        "suspended"
+      ],
       "default": "active"
     },
     "role": {
       "type": "enumeration",
-      "enum": ["member", "admin"],
+      "enum": [
+        "member",
+        "admin"
+      ],
       "default": "member"
     },
     "assignedAt": {
@@ -48,7 +54,12 @@
     },
     "source": {
       "type": "enumeration",
-      "enum": ["manual", "import", "handle", "legacy"]
+      "enum": [
+        "manual",
+        "import",
+        "handle",
+        "legacy"
+      ]
     },
     "addedBy": {
       "type": "relation",
@@ -59,6 +70,10 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::handle-admin.handle-admin"
+    },
+    "publicationCodes": {
+      "type": "json",
+      "description": "Publication codes this member reads through the organisation, e.g. [\"NV\",\"BK\"]. Empty/null on older seats = every publication the organisation pays for. Each code is limited by the seats on that publication's current contract."
     }
   }
 }

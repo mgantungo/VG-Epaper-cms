@@ -145,9 +145,13 @@ module.exports = ({ strapi }) => {
     return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 
-  const epaperLink = (date) => {
+  // Phase 0: links name the publication (/nv/2026/09/14), since several
+  // papers publish on the same date.
+  const epaperLink = (date, publicationCode) => {
     const day = toDateString(date);
-    return day ? `${EPAPER_BASE_URL}/${day.replace(/-/g, '/')}` : null;
+    if (!day) return null;
+    const pub = String(publicationCode || 'NV').toLowerCase();
+    return `${EPAPER_BASE_URL}/${pub}/${day.replace(/-/g, '/')}`;
   };
 
   const POPULATE = {
@@ -155,7 +159,7 @@ module.exports = ({ strapi }) => {
       fields: ['pageNumber', 'section'],
       populate: {
         image: { fields: ['url', 'alternativeText'] },
-        edition: { fields: ['date', 'sku'] },
+        edition: { fields: ['date', 'sku', 'publicationCode'] },
       },
     },
   };
@@ -165,22 +169,24 @@ module.exports = ({ strapi }) => {
     'editionSku', 'continuesToPage', 'createdAt',
   ];
 
-  /** editionSku -> edition.date, resolved in ONE batched query (draft/published rows share sku + date). */
+  /** editionSku -> { date, publicationCode }, resolved in ONE batched query (draft/published rows share sku + date). */
   const loadEditionDates = async (entries) => {
     const skus = [...new Set(entries.map((e) => e.editionSku).filter(Boolean))];
     const map = new Map();
     if (!skus.length) return map;
     const editions = await strapi.db.query(EDITION_UID).findMany({
       where: { sku: { $in: skus } },
-      select: ['sku', 'date'],
+      select: ['sku', 'date', 'publicationCode', 'coversTo'],
     });
-    for (const ed of editions) map.set(ed.sku, ed.date);
+    for (const ed of editions) map.set(ed.sku, { date: ed.date, publicationCode: ed.publicationCode || null, coversTo: ed.coversTo || null });
     return map;
   };
 
   const shape = (entry, editionDates, terms, { score, matchedIn }) => {
     const page = entry.page ?? null;
-    const date = (entry.editionSku && editionDates.get(entry.editionSku)) || page?.edition?.date || null;
+    const ed = (entry.editionSku && editionDates.get(entry.editionSku)) || null;
+    const date = ed?.date || page?.edition?.date || null;
+    const publicationCode = ed?.publicationCode || page?.edition?.publicationCode || null;
     return {
       documentId: entry.documentId,
       headline: entry.headline,
@@ -193,7 +199,10 @@ module.exports = ({ strapi }) => {
       continuesToPage: entry.continuesToPage ?? null,
       imageUrl: absoluteUrl(page?.image?.url),
       editionSku: entry.editionSku ?? null,
-      epaperLink: epaperLink(date),
+      publicationCode,
+      editionDate: toDateString(date) || null,
+      editionCoversTo: toDateString(ed?.coversTo) || toDateString(date) || null,
+      epaperLink: epaperLink(date, publicationCode),
       createdAt: entry.createdAt,
       score: Math.round(score * 1000) / 1000,
       matchedIn,

@@ -64,8 +64,117 @@ function extractMediaId(value) {
   return value;
 }
 
+const { errors } = require('@strapi/utils');
+const { editionCover } = require('./utils/epaper-dates');
+
+const EDITION_UID = 'api::edition.edition';
+const PUBLICATION_UID = 'api::publication.publication';
+
+/**
+ * Publication rules for every Edition write that goes through the Document
+ * Service (REST, the admin panel, the middleware's POST /api/editions):
+ *   - the publication can be given as the relation or just as
+ *     publicationCode; the other one is filled in, so they never disagree
+ *   - coversFrom/coversTo are derived from date + the publication's
+ *     coverDays (a weekend edition dated Saturday covers Saturday–Sunday)
+ *   - one edition per publication per date (date alone is no longer unique)
+ * Refusals are ValidationErrors, so REST callers get a 400 with the reason.
+ */
+async function applyPublicationRules(strapi, context) {
+  const data = context.params?.data;
+  if (!data) return;
+  const touchesPub = 'publicationCode' in data || 'publication' in data;
+  const touchesDate = 'date' in data;
+  if (context.action === 'update' && !touchesPub && !touchesDate) return;
+
+  let before = null;
+  if (context.action === 'update' && context.params.documentId) {
+    before = await strapi.documents(EDITION_UID).findOne({
+      documentId: context.params.documentId,
+      status: 'draft',
+      populate: { publication: { fields: ['code'] } }
+    });
+  }
+
+  let code = data.publicationCode ? String(data.publicationCode).trim().toUpperCase() : null;
+  if (!code && !('publicationCode' in data)) code = before?.publication?.code || before?.publicationCode || null;
+  if (!code && context.action === 'create') code = 'NV';
+  if (!code) throw new errors.ValidationError('publicationCode is required');
+
+  const pub = await strapi.db.query(PUBLICATION_UID).findOne({ where: { code } });
+  if (!pub) throw new errors.ValidationError(`Unknown publication "${code}". Create it in handle under Publications first.`);
+
+  const date = data.date || before?.date;
+  if (!date) throw new errors.ValidationError('date is required');
+
+  const clash = await strapi.db.query(EDITION_UID).findOne({
+    where: {
+      publication: { id: pub.id },
+      date,
+      ...(context.params.documentId ? { documentId: { $ne: context.params.documentId } } : {})
+    },
+    select: ['id', 'documentId']
+  });
+  if (clash) throw new errors.ValidationError(`There is already a ${code} edition for ${date}. Open that edition instead of creating another.`);
+
+  const cover = editionCover(String(date).slice(0, 10), pub.coverDays);
+  data.publicationCode = code;
+  data.publication = { connect: [{ documentId: pub.documentId }] };
+  data.coversFrom = cover.coversFrom;
+  data.coversTo = cover.coversTo;
+}
+
+/**
+ * One-time, idempotent backfill run at every start:
+ *   1. every publicationCode used by an edition gets a Publication row
+ *      (named after its code; rename it in handle)
+ *   2. every edition row without a publication or cover dates gets them
+ * Uses strapi.db.query directly, so it does not trigger ingest.
+ */
+async function backfillPublications(strapi) {
+  const db = (uid) => strapi.db.query(uid);
+  const rows = await db(EDITION_UID).findMany({
+    select: ['id', 'date', 'publicationCode', 'coversFrom', 'coversTo'],
+    populate: { publication: { select: ['id', 'code', 'coverDays'] } }
+  });
+  if (!rows.length) return;
+
+  const codes = [...new Set(rows.map((r) => (r.publicationCode || 'NV').toUpperCase()))];
+  const pubs = new Map((await db(PUBLICATION_UID).findMany({ where: { code: { $in: codes } } })).map((p) => [p.code, p]));
+  for (const code of codes) {
+    if (pubs.has(code)) continue;
+    const created = await db(PUBLICATION_UID).create({
+      data: { code, title: code, name: code, frequency: 'daily', coverDays: 1, active: true, sortOrder: 0 }
+    });
+    pubs.set(code, created);
+    strapi.log.info(`[publications] created publication ${code} for existing editions — rename it in handle`);
+  }
+
+  let fixed = 0;
+  for (const r of rows) {
+    const pub = r.publication?.id ? r.publication : pubs.get((r.publicationCode || 'NV').toUpperCase());
+    if (!pub || !r.date) continue;
+    const cover = editionCover(r.date, pub.coverDays);
+    if (r.publication?.id && r.coversFrom === cover.coversFrom && r.coversTo === cover.coversTo) continue;
+    await db(EDITION_UID).update({
+      where: { id: r.id },
+      data: { publication: pub.id, publicationCode: pub.code, coversFrom: cover.coversFrom, coversTo: cover.coversTo }
+    });
+    fixed += 1;
+  }
+  if (fixed) strapi.log.info(`[publications] linked ${fixed} edition rows to their publication and cover dates`);
+}
+
 module.exports = {
   register({ strapi }) {
+    // Publication rules run first, so a refused edition never reaches the ingest trigger below.
+    strapi.documents.use(async (context, next) => {
+      if (context.uid === EDITION_UID && (context.action === 'create' || context.action === 'update')) {
+        await applyPublicationRules(strapi, context);
+      }
+      return next();
+    });
+
     /**
      * Fires whenever an Edition document is created or updated. If
      * `sourcePdf` was PART OF THIS WRITE AND ITS VALUE ACTUALLY CHANGED, it
@@ -136,6 +245,12 @@ module.exports = {
   },
 
   async bootstrap({ strapi }) {
+    try {
+      await backfillPublications(strapi);
+    } catch (err) {
+      strapi.log.error(`[publications] backfill failed: ${err.message}`);
+    }
+
     // Idempotent: creates FULLTEXT indexes on stories.headline / stories.body if missing.
     // Runs after Strapi's schema sync. Never blocks startup if it fails.
     try {

@@ -21,6 +21,13 @@
  *   member window = epaper-entitlement, scope org_member, one member's access
  *   seats in use  = ACTIVE seats only. Suspending a member frees a seat.
  *
+ * Phase 0 (publications, 23 Oct 2026): a contract is per PUBLICATION. One
+ * "paid period" from handle creates one org_contract row per publication,
+ * each with its own seats and hand-entered amount (organisations are priced
+ * by hand; there is no plan behind a contract). Each member seat lists the
+ * publications it reads (publicationCodes); a publication's active seats can
+ * never exceed the seats on its current contract.
+ *
  * All DB access via strapi.db.query(...), per this project's convention.
  */
 
@@ -28,9 +35,10 @@ const ORG = 'api::epaper-organization.epaper-organization';
 const SEAT = 'api::epaper-org-seat.epaper-org-seat';
 const ENT = 'api::epaper-entitlement.epaper-entitlement';
 const USER = 'api::epaper-user.epaper-user';
-const PLAN = 'api::epaper-plan.epaper-plan';
 const AUDIT = 'api::epaper-org-audit.epaper-org-audit';
 const HADMIN = 'api::handle-admin.handle-admin';
+const PUB = 'api::publication.publication';
+const { kampalaToday } = require('../../../utils/epaper-dates');
 
 class OrgError extends Error {
   constructor(status, message) {
@@ -39,8 +47,8 @@ class OrgError extends Error {
   }
 }
 
-// Same definition of "today" as the middleware's access.js (server UTC date).
-const todayIso = () => new Date().toISOString().slice(0, 10);
+// Kampala calendar day, the same "today" the middleware's access check uses.
+const todayIso = () => kampalaToday();
 
 function isIsoDate(s) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
@@ -73,6 +81,17 @@ function pageArgs(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize, 10) || 25));
   return { page, pageSize, offset: (page - 1) * pageSize, limit: pageSize };
+}
+
+const normCode = (c) => String(c || '').trim().toUpperCase();
+
+/** A seat's publications: an explicit list (possibly empty), or null
+ * meaning "all the organisation pays for" (seats created before
+ * per-publication seats). */
+function seatCodes(seat) {
+  // An empty list is a real choice (reads nothing through the organisation);
+  // only a missing list means "everything".
+  return Array.isArray(seat.publicationCodes) ? seat.publicationCodes.map(normCode) : null;
 }
 
 function publicUser(u) {
@@ -117,18 +136,138 @@ module.exports = ({ strapi }) => {
         $or: [{ scope: 'org_contract' }, { scope: { $null: true } }]
       },
       orderBy: { coverageStart: 'asc' },
-      populate: { user: { select: ['id'] }, plan: { select: ['id', 'key', 'label'] } }
+      populate: {
+        user: { select: ['id'] },
+        plan: { select: ['id', 'key', 'label'] },
+        publication: { select: ['id', 'code', 'name', 'colour'] }
+      }
     });
     return rows.filter(isContract).map((e) => ({
       id: e.id,
+      publication: e.publication ? { code: e.publication.code, name: e.publication.name, colour: e.publication.colour || null } : null,
       coverageStart: e.coverageStart,
       coverageEnd: e.coverageEnd,
+      seats: e.seats ?? null,
       plan: e.plan ? { key: e.plan.key, label: e.plan.label } : null,
-      amountPaid: e.amountPaid ?? null,
+      amountPaid: e.amountPaid === null || e.amountPaid === undefined ? null : Number(e.amountPaid),
       currency: e.currency || null,
+      reference: e.reference || null,
       note: e.note || null,
       createdAt: e.createdAt
     }));
+  }
+
+  /**
+   * Per publication: the contract that governs seats today (the current one,
+   * else the next upcoming), its seats, and how many ACTIVE member seats read
+   * it. Seats with no explicit list (older seats) count against every
+   * publication the organisation has.
+   */
+  async function publicationSeatUse(orgId, contracts) {
+    const list = contracts || (await contractsFor(orgId));
+    const today = todayIso();
+    const seats = await q(SEAT).findMany({
+      where: { organization: { id: orgId }, active: true },
+      select: ['id', 'publicationCodes']
+    });
+    const byCode = new Map();
+    for (const c of list) {
+      if (!c.publication) continue;
+      const code = c.publication.code;
+      const entry = byCode.get(code) || { code, name: c.publication.name, colour: c.publication.colour, current: null, next: null, latestEnd: null };
+      if (c.coverageStart <= today && today <= c.coverageEnd) {
+        if (!entry.current || c.coverageEnd > entry.current.coverageEnd) entry.current = c;
+      } else if (c.coverageStart > today) {
+        if (!entry.next || c.coverageStart < entry.next.coverageStart) entry.next = c;
+      }
+      if (!entry.latestEnd || c.coverageEnd > entry.latestEnd) entry.latestEnd = c.coverageEnd;
+      byCode.set(code, entry);
+    }
+    return [...byCode.values()].map((e) => {
+      const governing = e.current || e.next;
+      const inUse = seats.filter((s) => {
+        const codes = seatCodes(s);
+        return codes === null || codes.includes(e.code);
+      }).length;
+      return {
+        code: e.code,
+        name: e.name,
+        colour: e.colour || null,
+        seats: governing ? governing.seats ?? null : null,
+        inUse,
+        current: e.current ? { start: e.current.coverageStart, end: e.current.coverageEnd } : null,
+        next: e.next ? { start: e.next.coverageStart, end: e.next.coverageEnd } : null,
+        latestEnd: e.latestEnd
+      };
+    }).sort((a, b) => a.code.localeCompare(b.code));
+  }
+
+  /** Publications a new member gets by default: every one with a current or
+   * upcoming contract that still has a free seat. */
+  async function defaultSeatPublications(orgId) {
+    const use = await publicationSeatUse(orgId);
+    return use
+      .filter((u) => (u.current || u.next) && (u.seats === null || u.inUse < u.seats))
+      .map((u) => u.code);
+  }
+
+  /** Before (re)activating a seat: every publication it reads must still have a free seat. */
+  async function assertRoomForSeat(orgId, seat) {
+    const use = await publicationSeatUse(orgId);
+    const codes = seatCodes(seat) || use.map((u) => u.code);
+    for (const code of codes) {
+      const u = use.find((x) => x.code === code);
+      if (u && u.seats !== null && u.inUse >= u.seats) {
+        throw new OrgError(409, `All ${u.seats} ${code} seats are in use. Free one, or remove ${code} from this member first.`);
+      }
+    }
+  }
+
+  /** Validates contract lines: [{ publicationCode, seats, amount, currency? }]. */
+  async function cleanContractLines(lines) {
+    if (!Array.isArray(lines) || !lines.length) throw new OrgError(400, 'Add at least one publication to the paid period');
+    const codes = lines.map((l) => normCode(l.publicationCode));
+    if (new Set(codes).size !== codes.length) throw new OrgError(400, 'Each publication can appear only once in a paid period');
+    const pubs = await q(PUB).findMany({ where: { code: { $in: codes } } });
+    return lines.map((l, i) => {
+      const pub = pubs.find((p) => p.code === codes[i]);
+      if (!pub) throw new OrgError(400, `Unknown publication "${codes[i]}"`);
+      const seats = Number(l.seats);
+      if (!Number.isInteger(seats) || seats < 1) throw new OrgError(400, `${pub.code}: seats must be a whole number, 1 or more`);
+      const amount = l.amount === undefined || l.amount === null || l.amount === '' ? null : Number(l.amount);
+      if (amount !== null && (!Number.isInteger(amount) || amount < 0)) throw new OrgError(400, `${pub.code}: amount must be a whole number of shillings`);
+      return { pub, seats, amount, currency: String(l.currency || 'UGX').toUpperCase() };
+    });
+  }
+
+  /** Creates one org_contract row per line, inside the caller's transaction. */
+  async function createContractRows(orgId, { coverageStart, coverageEnd, reference, note }, lines, actorAdminId) {
+    const rows = [];
+    for (const line of lines) {
+      const row = await q(ENT).create({
+        data: {
+          organization: orgId,
+          scope: 'org_contract',
+          grantSource: 'handle',
+          grantedByAdmin: actorAdminId || null,
+          publication: line.pub.id,
+          coverageStart,
+          coverageEnd,
+          seats: line.seats,
+          amountPaid: line.amount,
+          amountAllocated: line.amount,
+          currency: line.currency,
+          reference: reference ? String(reference).slice(0, 120) : null,
+          note: note || null
+        }
+      });
+      await audit({
+        orgId, actorAdminId, action: 'contract.create',
+        meta: { contractId: row.id, publication: line.pub.code, seats: line.seats, coverageStart, coverageEnd, reference: reference || null }
+      });
+      rows.push(row);
+    }
+    return rows;
   }
 
   function summarizeContracts(contracts) {
@@ -248,6 +387,8 @@ module.exports = ({ strapi }) => {
         })
       ]);
 
+      const publications = await publicationSeatUse(orgId, contracts);
+
       return {
         organisation: {
           id: org.id,
@@ -266,6 +407,7 @@ module.exports = ({ strapi }) => {
         seats: { inUse: seatsInUse, suspended: suspendedSeats, limit: org.seatLimit ?? null },
         contracts,
         contractSummary: summarizeContracts(contracts),
+        publications,
         admins: adminSeats.map((s) => ({
           seatId: s.id,
           status: s.status || (s.active === false ? 'suspended' : 'active'),
@@ -295,13 +437,10 @@ module.exports = ({ strapi }) => {
       if (clash) throw new OrgError(409, `An organisation named "${clash.name}" already exists`);
 
       const contract = body.contract || null;
-      let plan = null;
+      let contractLines = null;
       if (contract) {
         requireRange(contract.coverageStart, contract.coverageEnd);
-        if (contract.planKey) {
-          plan = await q(PLAN).findOne({ where: { key: contract.planKey } });
-          if (!plan) throw new OrgError(404, `Plan "${contract.planKey}" not found`);
-        }
+        contractLines = await cleanContractLines(contract.lines);
       }
 
       // Validate the admin BEFORE writing anything, so a bad email can't
@@ -331,26 +470,9 @@ module.exports = ({ strapi }) => {
         });
         await audit({ orgId: org.id, actorAdminId, action: 'org.create', meta: { name, seatLimit } });
 
-        let contractRow = null;
+        let contractRows = [];
         if (contract) {
-          contractRow = await q(ENT).create({
-            data: {
-              organization: org.id,
-              scope: 'org_contract',
-              grantSource: 'handle',
-              grantedByAdmin: actorAdminId || null,
-              plan: plan ? plan.id : null,
-              coverageStart: contract.coverageStart,
-              coverageEnd: contract.coverageEnd,
-              amountPaid: contract.amountPaid ?? null,
-              currency: contract.currency || 'UGX',
-              note: contract.note || null
-            }
-          });
-          await audit({
-            orgId: org.id, actorAdminId, action: 'contract.create',
-            meta: { contractId: contractRow.id, coverageStart: contract.coverageStart, coverageEnd: contract.coverageEnd }
-          });
+          contractRows = await createContractRows(org.id, contract, contractLines, actorAdminId);
         }
 
         if (adminUser) {
@@ -361,7 +483,8 @@ module.exports = ({ strapi }) => {
               role: 'admin',
               status: 'active',
               source: 'handle',
-              addedByAdmin: actorAdminId || null
+              addedByAdmin: actorAdminId || null,
+              publicationCodes: contractLines ? contractLines.map((l) => l.pub.code) : []
             }
           });
           await audit({
@@ -369,8 +492,8 @@ module.exports = ({ strapi }) => {
             targetUserId: adminUser.id, targetEmail: adminUser.email, meta: { role: 'admin' }
           });
 
-          if (contractRow) {
-            const win = defaultWindow([{ coverageStart: contractRow.coverageStart, coverageEnd: contractRow.coverageEnd }]);
+          if (contractRows.length) {
+            const win = defaultWindow([{ coverageStart: contract.coverageStart, coverageEnd: contract.coverageEnd }]);
             if (win) {
               await q(ENT).create({
                 data: {
@@ -456,32 +579,18 @@ module.exports = ({ strapi }) => {
 
     // ---- contracts ----------------------------------------------------------
 
+    /**
+     * One paid period, priced by hand per publication.
+     * body: { coverageStart, coverageEnd, reference?, note?,
+     *         lines: [{ publicationCode, seats, amount, currency? }] }
+     */
     async addContract(orgIdRaw, body, actorAdminId) {
       const orgId = toId(orgIdRaw);
       await loadOrg(orgId);
       requireRange(body.coverageStart, body.coverageEnd);
-      let plan = null;
-      if (body.planKey) {
-        plan = await q(PLAN).findOne({ where: { key: body.planKey } });
-        if (!plan) throw new OrgError(404, `Plan "${body.planKey}" not found`);
-      }
-      const row = await q(ENT).create({
-        data: {
-          organization: orgId,
-          scope: 'org_contract',
-          grantSource: 'handle',
-          grantedByAdmin: actorAdminId || null,
-          plan: plan ? plan.id : null,
-          coverageStart: body.coverageStart,
-          coverageEnd: body.coverageEnd,
-          amountPaid: body.amountPaid ?? null,
-          currency: body.currency || 'UGX',
-          note: body.note || null
-        }
-      });
-      await audit({
-        orgId, actorAdminId, action: 'contract.create',
-        meta: { contractId: row.id, coverageStart: body.coverageStart, coverageEnd: body.coverageEnd, planKey: body.planKey || null }
+      const lines = await cleanContractLines(body.lines);
+      await strapi.db.transaction(async () => {
+        await createContractRows(orgId, body, lines, actorAdminId);
       });
       return this.getOrg(orgId);
     },
@@ -502,10 +611,26 @@ module.exports = ({ strapi }) => {
 
       const data = { coverageStart: start, coverageEnd: end };
       if (body.note !== undefined) data.note = body.note || null;
+      if (body.reference !== undefined) data.reference = body.reference ? String(body.reference).slice(0, 120) : null;
+      if (body.seats !== undefined) {
+        const seats = Number(body.seats);
+        if (!Number.isInteger(seats) || seats < 1) throw new OrgError(400, 'seats must be a whole number, 1 or more');
+        data.seats = seats;
+      }
+      if (body.amount !== undefined) {
+        const amount = body.amount === null || body.amount === '' ? null : Number(body.amount);
+        if (amount !== null && (!Number.isInteger(amount) || amount < 0)) throw new OrgError(400, 'amount must be a whole number of shillings');
+        data.amountPaid = amount;
+        data.amountAllocated = amount;
+      }
       await q(ENT).update({ where: { id: entId }, data });
       await audit({
         orgId, actorAdminId, action: 'contract.extend',
-        meta: { contractId: entId, from: { start: ent.coverageStart, end: ent.coverageEnd }, to: { start, end } }
+        meta: {
+          contractId: entId,
+          from: { start: ent.coverageStart, end: ent.coverageEnd, seats: ent.seats ?? null },
+          to: { start, end, seats: data.seats ?? ent.seats ?? null }
+        }
       });
       return this.getOrg(orgId);
     },
@@ -560,7 +685,8 @@ module.exports = ({ strapi }) => {
           await q(SEAT).create({
             data: {
               organization: orgId, user: user.id, role: 'admin', status: 'active',
-              source: 'handle', addedByAdmin: actorAdminId || null
+              source: 'handle', addedByAdmin: actorAdminId || null,
+              publicationCodes: await defaultSeatPublications(orgId)
             }
           });
           await audit({
@@ -680,6 +806,8 @@ module.exports = ({ strapi }) => {
           user: publicUser(s.user),
           // Added by an Org Admin and hasn't set a password through the invite yet.
           invitePending: Boolean(s.user && ['org_invite', 'org_import'].includes(s.user.accountSource) && !s.user.passwordSetAt),
+          // null = every publication the organisation pays for (seats from before per-publication seats)
+          publications: seatCodes(s),
           access: {
             current: current ? { start: current.coverageStart, end: current.coverageEnd } : null,
             latestEnd,
@@ -708,6 +836,7 @@ module.exports = ({ strapi }) => {
           const inUse = await activeSeatCount(orgId);
           if (inUse >= org.seatLimit) throw new OrgError(409, `All ${org.seatLimit} seats are in use`);
         }
+        await assertRoomForSeat(orgId, seat);
       }
 
       await q(SEAT).update({
@@ -719,6 +848,48 @@ module.exports = ({ strapi }) => {
         targetUserId: seat.user?.id, targetEmail: seat.user?.email, meta: { reason: reason || null, by: 'handle' }
       });
       return { success: true };
+    },
+
+    // ---- member publications ------------------------------------------------
+
+    publicationSeatUse: (orgIdRaw) => publicationSeatUse(toId(orgIdRaw)),
+    assertRoomForSeat: (orgIdRaw, seat) => assertRoomForSeat(toId(orgIdRaw), seat),
+    defaultSeatPublications: (orgIdRaw) => defaultSeatPublications(toId(orgIdRaw)),
+    seatCodes,
+
+    /**
+     * Sets which publications one member reads. Used by handle and by the
+     * Org Admin (actor = { actorAdminId } or { actorUserId }).
+     * A publication can only be added if the organisation pays for it and
+     * its current (or next) contract still has a free seat.
+     */
+    async setSeatPublications(orgIdRaw, seatIdRaw, codesIn, actor = {}) {
+      const orgId = toId(orgIdRaw);
+      const seat = await loadSeatInOrg(orgId, toId(seatIdRaw));
+      const codes = [...new Set((Array.isArray(codesIn) ? codesIn : []).map(normCode).filter(Boolean))].sort();
+      const use = await publicationSeatUse(orgId);
+      const before = seatCodes(seat);
+      const had = (code) => before === null || before.includes(code);
+
+      for (const code of codes) {
+        const u = use.find((x) => x.code === code);
+        if (!u || (!u.current && !u.next)) throw new OrgError(409, `Your organisation does not pay for ${code}`);
+        const active = seat.status ? seat.status === 'active' : seat.active !== false;
+        if (active && !had(code) && u.seats !== null && u.inUse >= u.seats) {
+          throw new OrgError(409, `All ${u.seats} ${code} seats are in use. Free one first or ask New Vision for more.`);
+        }
+      }
+      await q(SEAT).update({ where: { id: seat.id }, data: { publicationCodes: codes } });
+      await audit({
+        orgId,
+        actorAdminId: actor.actorAdminId || null,
+        actorUserId: actor.actorUserId || null,
+        action: 'member.publications',
+        targetUserId: seat.user?.id,
+        targetEmail: seat.user?.email,
+        meta: { from: before, to: codes }
+      });
+      return { success: true, publications: codes };
     },
 
     // ---- audit --------------------------------------------------------------

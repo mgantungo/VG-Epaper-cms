@@ -18,7 +18,7 @@
 const { createCoreController } = require('@strapi/strapi').factories;
 
 const UID = 'api::epaper-transaction.epaper-transaction';
-const PLAN_UID = 'api::epaper-plan.epaper-plan';
+const CATALOGUE_UID = 'api::catalogue.catalogue-store';
 
 function appendToLog(existingLog, entry) {
 	const log = Array.isArray(existingLog) ? existingLog : [];
@@ -26,41 +26,30 @@ function appendToLog(existingLog, entry) {
 }
 
 module.exports = createCoreController(UID, ({ strapi }) => ({
-	// POST /api/epaper-transactions/initialize
-	// Body: { userId, phoneNumber, paymentmethod, planKey, purchaseKind,
-	//         customerName?, customerEmail?, customerPhone?,
-	//         organizationName?,   // required if purchaseKind === 'organization_new'
-	//         organizationId?,     // required if purchaseKind === 'organization_topup'
-	//         seatCount?,          // org purchases only, default 1
-	//         archiveDate?,        // single_archive plans — one date (back-compat)
-	//         archiveDates? }      // single_archive plans — "buy any number of
-	//                              // archives in one purchase": an array of dates,
-	//                              // price scales by how many are selected.
-	//                              // archiveDate is still accepted as a single-
-	//                              // element equivalent; if both are given,
-	//                              // archiveDates wins.
+	// POST /api/epaper-transactions/initialize                 REWRITTEN (Phase 0)
+	// Body: { userId, phoneNumber, paymentmethod, planKey,
+	//         editionDates?,            // single_issue plans: one or more dates of the
+	//                                   // plan's publication ("buy several back issues
+	//                                   // at once"); archiveDates / archiveDate are
+	//                                   // accepted as older names for the same thing
+	//         customerName?, customerEmail?, customerPhone? }
+	//
+	// Individuals only, at the standard price on sale today (agreed 23 Oct
+	// 2026: no negotiation for individuals). Organisations are not sold plans;
+	// their contracts are priced by hand in handle (org-management). The
+	// amount is computed here from the plan version, never taken from the client.
 	async initialize(ctx) {
 		const body = ctx.request.body || {};
-		const { userId, phoneNumber, paymentmethod, planKey, purchaseKind } = body;
+		const { userId, phoneNumber, paymentmethod, planKey } = body;
 
-		if (!userId || !phoneNumber || !paymentmethod || !planKey || !purchaseKind) {
+		if (!userId || !phoneNumber || !paymentmethod || !planKey) {
 			ctx.status = 400;
-			ctx.body = { error: 'Missing required fields: userId, phoneNumber, paymentmethod, planKey, purchaseKind' };
+			ctx.body = { error: 'Missing required fields: userId, phoneNumber, paymentmethod, planKey' };
 			return;
 		}
-		if (!['personal', 'organization_new', 'organization_topup'].includes(purchaseKind)) {
+		if (body.purchaseKind && body.purchaseKind !== 'personal') {
 			ctx.status = 400;
-			ctx.body = { error: 'purchaseKind must be personal, organization_new, or organization_topup' };
-			return;
-		}
-		if (purchaseKind === 'organization_new' && !body.organizationName) {
-			ctx.status = 400;
-			ctx.body = { error: 'organizationName is required for purchaseKind=organization_new' };
-			return;
-		}
-		if (purchaseKind === 'organization_topup' && !body.organizationId) {
-			ctx.status = 400;
-			ctx.body = { error: 'organizationId is required for purchaseKind=organization_topup' };
+			ctx.body = { error: 'Organisations are set up by New Vision, not bought online. Contact us for a contract.' };
 			return;
 		}
 
@@ -71,46 +60,47 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 			);
 		}
 
-		const plan = await strapi.db.query(PLAN_UID).findOne({ where: { key: planKey, active: true } });
+		const catalogue = strapi.service(CATALOGUE_UID);
+		const plan = await catalogue.planForSale(planKey);
 		if (!plan) {
 			ctx.status = 404;
-			ctx.body = { error: `No active plan with key "${planKey}"` };
+			ctx.body = { error: `"${planKey}" is not on sale today` };
+			return;
+		}
+		const publicationCodes = (plan.publications || []).map((p) => p.code).sort();
+		if (!publicationCodes.length) {
+			ctx.status = 409;
+			ctx.body = { error: `Plan "${planKey}" includes no publication` };
 			return;
 		}
 
-		// Normalize to an array regardless of which shape the caller sent —
-		// archiveDates (plural, "any number of archives") is the primary
-		// shape now; a single archiveDate is still accepted for back-compat,
-		// treated as a one-element array. Duplicates are stripped, not
-		// billed twice for the same date.
-		let archiveDates = [];
-		if (plan.kind === 'single_archive') {
-			const raw = Array.isArray(body.archiveDates) ? body.archiveDates : (body.archiveDate ? [body.archiveDate] : []);
-			archiveDates = [...new Set(raw.filter(Boolean))];
-			if (archiveDates.length === 0) {
+		let editions = [];
+		if (plan.kind === 'single_issue') {
+			const raw = Array.isArray(body.editionDates) ? body.editionDates
+				: Array.isArray(body.archiveDates) ? body.archiveDates
+					: (body.editionDate || body.archiveDate) ? [body.editionDate || body.archiveDate] : [];
+			const dates = [...new Set(raw.filter(Boolean).map(String))];
+			if (!dates.length) {
 				ctx.status = 400;
-				ctx.body = { error: 'archiveDate or archiveDates is required for this plan' };
+				ctx.body = { error: 'Choose the edition(s) to buy (editionDates)' };
+				return;
+			}
+			if (dates.length > 60) {
+				ctx.status = 400;
+				ctx.body = { error: 'At most 60 editions in one purchase' };
+				return;
+			}
+			try {
+				editions = await catalogue.editionsFor(publicationCodes[0], dates);
+			} catch (err) {
+				ctx.status = err.status || 500;
+				ctx.body = { error: err.message };
 				return;
 			}
 		}
 
-		const isOrgPurchase = purchaseKind !== 'personal';
-		if (isOrgPurchase && !plan.allowsOrgPurchase) {
-			ctx.status = 400;
-			ctx.body = { error: `Plan "${planKey}" cannot be purchased for an organization` };
-			return;
-		}
-
-		// Amount is computed here from the plan's own price — NEVER trusted
-		// from the client. Scales by seat count (org purchases) AND by how
-		// many archive dates were selected — a client-submitted amount
-		// would let anyone request a real payment prompt for a self-chosen
-		// figure; only these two multipliers vary the total, and both are
-		// derived server-side from what was actually validated above.
-		const seatCount = isOrgPurchase ? Math.max(1, parseInt(body.seatCount, 10) || 1) : 1;
-		const dateMultiplier = plan.kind === 'single_archive' ? archiveDates.length : 1;
-		const amount = plan.price * seatCount * dateMultiplier;
-
+		const quantity = plan.kind === 'single_issue' ? editions.length : 1;
+		const amount = Number(plan.price) * quantity;
 		const service = strapi.service(UID);
 
 		try {
@@ -124,17 +114,20 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 					phone_number: phoneNumber,
 					payment_method: paymentmethod,
 					user: userId,
-					organization: purchaseKind === 'organization_topup' ? body.organizationId : null,
+					organization: null,
 					plan: plan.id,
-					purchase_kind: purchaseKind,
+					purchase_kind: 'personal',
 					customer_name: body.customerName || '',
 					customer_email: body.customerEmail || '',
 					customer_phone: body.customerPhone || phoneNumber,
 					transaction_data: {
-						planKey,
-						seatCount,
-						archiveDates: plan.kind === 'single_archive' ? archiveDates : null,
-						organizationName: body.organizationName || null
+						planKey: plan.key,
+						planVersion: plan.version,
+						planLabel: plan.label,
+						publicationCodes,
+						quantity,
+						editionIds: editions.map((e) => e.id),
+						editionDates: editions.map((e) => e.date)
 					},
 					aggregator_response_log: []
 				}
@@ -167,7 +160,9 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				status: updated.frontend_status,
 				amount,
 				currency: updated.currency,
-				archiveDatesCount: archiveDates.length || undefined
+				planLabel: plan.label,
+				publicationCodes,
+				editionsCount: editions.length || undefined
 			};
 		} catch (error) {
 			strapi.log.error('[epaper-transaction.initialize]', error);
@@ -233,7 +228,7 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				// own relationId() helper already knows how to read.
 				const fullRecord = await strapi.db.query(UID).findOne({
 					where: { id: updated.id },
-					populate: ['plan', 'user', 'organization']
+					populate: { plan: { populate: { publications: { select: ['id', 'code'] } } }, user: true, organization: true }
 				});
 				strapi.service(UID).grantEntitlement(strapi, fullRecord).catch(error => {
 					strapi.log.error(`[epaper-transaction.callback] failed to grant entitlement for transaction ${updated.id}`, error);
@@ -256,10 +251,16 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				ctx.body = { success: 0, error: 'No records found' };
 				return;
 			}
+			// access_ready: entitlements exist (they're granted just after the
+			// callback), so the reader can open what they bought right now.
+			const granted = record.payment_success
+				? await strapi.db.query('api::epaper-entitlement.epaper-entitlement').count({ where: { transaction: { id: record.id } } })
+				: 0;
 			ctx.body = {
 				success: 1,
 				callback_received: record.callback_received,
 				payment_success: record.payment_success,
+				access_ready: granted > 0,
 				frontend_status: record.frontend_status,
 				aggregator_status: record.aggregator_status,
 				invoice_number: record.invoice_number,
@@ -274,7 +275,9 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 
 	// GET /api/epaper-transactions/receipt/:token
 	// Only returns data once payment has actually succeeded. `coverage` is
-	// now an ARRAY, not a single {start,end} object — a single_archive
+	// now an ARRAY, not a single {start,end} object — a bundle or a
+	// multi-edition single-issue purchase grants several entitlements, one
+	// per publication or edition, each with its publication code. (Was: a single_archive
 	// purchase can grant more than one entitlement in one transaction
 	// (see grantEntitlement's own comment), so this returns every date
 	// range actually granted, not just the first one findOne would have
@@ -298,7 +301,8 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 			}
 
 			const entitlements = await strapi.db.query('api::epaper-entitlement.epaper-entitlement').findMany({
-				where: { transaction: record.id }
+				where: { transaction: record.id },
+				populate: { publication: { select: ['code', 'name'] } }
 			});
 
 			ctx.body = {
@@ -310,7 +314,12 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
 				payment_method: record.payment_method,
 				plan_label: record.plan?.label,
 				purchase_kind: record.purchase_kind,
-				coverage: entitlements.map(e => ({ start: e.coverageStart, end: e.coverageEnd }))
+				coverage: entitlements.map(e => ({
+					start: e.coverageStart,
+					end: e.coverageEnd,
+					publication: e.publication?.code || null,
+					publicationName: e.publication?.name || null
+				}))
 			};
 		} catch (error) {
 			strapi.log.error('[epaper-transaction.receipt]', error);

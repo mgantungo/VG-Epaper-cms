@@ -56,6 +56,7 @@ module.exports = ({ strapi }) => {
     setStatus: handle('setStatus', (ctx) => svc().setStatus(actorUserId(ctx), ctx.params.seatId, body(ctx))),
     setRole: handle('setRole', (ctx) => svc().setRole(actorUserId(ctx), ctx.params.seatId, body(ctx))),
     removeMember: handle('removeMember', (ctx) => svc().removeMember(actorUserId(ctx), ctx.params.seatId, body(ctx))),
+    setMemberPublications: handle('setMemberPublications', (ctx) => svc().setMemberPublications(actorUserId(ctx), ctx.params.seatId, body(ctx))),
     resendInvite: handle('resendInvite', (ctx) => svc().resendInvite(actorUserId(ctx), ctx.params.seatId)),
     previewImport: handle('previewImport', (ctx) => svc().previewImport(actorUserId(ctx), body(ctx))),
     commitImport: handle('commitImport', (ctx) => svc().commitImport(actorUserId(ctx), ctx.params.importId)),

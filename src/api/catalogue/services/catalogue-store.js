@@ -565,7 +565,7 @@ module.exports = ({ strapi }) => {
       if (!isIsoDate(validFrom)) throw new CatalogueError(400, 'validFrom must be YYYY-MM-DD');
       // May be in the past (e.g. to record a price that already applied). Sales
       // keep the version they were charged at, so earlier revenue never changes.
-      if (validFrom < '2000-01-01') throw new CatalogueError(400, 'validFrom is too far in the past');
+      if (validFrom < '1900-01-01') throw new CatalogueError(400, 'validFrom is too far in the past');
 
       const price = body.price !== undefined ? cleanPrice(body.price) : Number(latest.price);
       const split = codes.length > 1

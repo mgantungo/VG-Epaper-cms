@@ -7,7 +7,9 @@
     "displayName": "Publication",
     "description": "One paper that is sold on its own, e.g. NV (New Vision daily) or NVW (New Vision weekend). `title` groups publications of the same paper on the reader landing page. Every edition belongs to one publication, and every entitlement opens exactly one publication. Managed from handle (Publications page)."
   },
-  "options": { "draftAndPublish": false },
+  "options": {
+    "draftAndPublish": false
+  },
   "pluginOptions": {},
   "attributes": {
     "code": {
@@ -17,13 +19,46 @@
       "regex": "^[A-Z0-9]{1,12}$",
       "description": "Short upper-case code used in URLs (/nv/2026-10-23), SKUs and reports. Never change it once editions exist."
     },
-    "title": { "type": "string", "required": true, "description": "The paper's name readers know, e.g. 'New Vision'. Publications with the same title share one card on the landing page." },
-    "name": { "type": "string", "required": true, "description": "Full name of this publication, e.g. 'New Vision weekend'." },
-    "editionLabel": { "type": "string", "description": "Short label on the landing page row, e.g. 'Daily' or 'Weekend'." },
-    "language": { "type": "string", "default": "English" },
+    "title": {
+      "type": "string",
+      "required": true,
+      "description": "The paper's name readers know, e.g. 'New Vision'. Publications with the same title share one card on the landing page."
+    },
+    "name": {
+      "type": "string",
+      "required": true,
+      "description": "Full name of this publication, e.g. 'New Vision weekend'."
+    },
+    "editionLabel": {
+      "type": "string",
+      "description": "Short label on the landing page row, e.g. 'Daily' or 'Weekend'."
+    },
+    "category": {
+      "type": "enumeration",
+      "enum": [
+        "newspaper",
+        "supplement",
+        "magazine",
+        "other"
+      ],
+      "default": "newspaper",
+      "description": "Section on the reader landing page: Newspapers, Pullouts and supplements, Magazines, Other."
+    },
+    "language": {
+      "type": "string",
+      "default": "English"
+    },
     "frequency": {
       "type": "enumeration",
-      "enum": ["daily", "weekend", "weekly", "monthly", "quarterly", "yearly", "irregular"],
+      "enum": [
+        "daily",
+        "weekend",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "irregular"
+      ],
       "default": "daily",
       "required": true
     },
@@ -34,11 +69,26 @@
       "max": 366,
       "description": "How many days one edition covers, starting on its date. Daily = 1; a weekend edition dated Saturday = 2 (Saturday and Sunday). Publications with no set release date use 1: each issue covers its own date."
     },
-    "scheduleNote": { "type": "string", "description": "Shown to readers, e.g. 'Mon–Fri' or 'Sat–Sun'. Leave empty when there is no set release date." },
-    "colour": { "type": "string", "default": "#2f55e4" },
-    "description": { "type": "text" },
-    "active": { "type": "boolean", "default": true, "description": "Inactive publications are hidden from readers; existing access keeps working." },
-    "sortOrder": { "type": "integer", "default": 0 },
+    "scheduleNote": {
+      "type": "string",
+      "description": "Shown to readers, e.g. 'Mon–Fri' or 'Sat–Sun'. Leave empty when there is no set release date."
+    },
+    "colour": {
+      "type": "string",
+      "default": "#2f55e4"
+    },
+    "description": {
+      "type": "text"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Inactive publications are hidden from readers; existing access keeps working."
+    },
+    "sortOrder": {
+      "type": "integer",
+      "default": 0
+    },
     "editions": {
       "type": "relation",
       "relation": "oneToMany",

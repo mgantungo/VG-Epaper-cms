@@ -40,6 +40,7 @@ const ENT = 'api::epaper-entitlement.epaper-entitlement';
 const SEAT = 'api::epaper-org-seat.epaper-org-seat';
 
 const FREQUENCIES = ['daily', 'weekend', 'weekly', 'monthly', 'quarterly', 'yearly', 'irregular'];
+const CATEGORIES = ['newspaper', 'supplement', 'magazine', 'other'];
 const DEFAULT_COVER_DAYS = { daily: 1, weekend: 2, weekly: 7 };
 const UNITS = ['day', 'week', 'month', 'year'];
 const KINDS = ['period', 'single_issue'];
@@ -71,6 +72,7 @@ function publicPublication(p) {
     title: p.title,
     name: p.name,
     editionLabel: p.editionLabel || null,
+    category: p.category || 'newspaper',
     language: p.language || null,
     frequency: p.frequency,
     coverDays: p.coverDays || 1,
@@ -478,6 +480,11 @@ module.exports = ({ strapi }) => {
         if (body[f] !== undefined) data[f] = body[f] ? String(body[f]).trim().slice(0, f === 'description' ? 1000 : 60) : null;
       }
       if (body.colour && !/^#[0-9a-fA-F]{6}$/.test(String(body.colour).trim())) throw new CatalogueError(400, 'colour must look like #2f55e4');
+      if (body.category !== undefined || isCreate) {
+        const c = String(body.category || 'newspaper');
+        if (!CATEGORIES.includes(c)) throw new CatalogueError(400, `category must be one of: ${CATEGORIES.join(', ')}`);
+        data.category = c;
+      }
       if (body.frequency !== undefined || isCreate) {
         const f = String(body.frequency || 'daily');
         if (!FREQUENCIES.includes(f)) throw new CatalogueError(400, `frequency must be one of: ${FREQUENCIES.join(', ')}`);

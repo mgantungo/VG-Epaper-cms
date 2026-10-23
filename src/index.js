@@ -251,6 +251,32 @@ module.exports = {
       strapi.log.error(`[publications] backfill failed: ${err.message}`);
     }
 
+    // Reader analytics (Phases 1–4): create the tables if missing, then keep
+    // today's and yesterday's daily totals fresh every 15 minutes.
+    // ANALYTICS_ROLLUP=off stops the job (e.g. on a second CMS instance).
+    try {
+      const analytics = strapi.service('api::analytics.analytics-store');
+      await analytics.ensureTables();
+      if (String(process.env.ANALYTICS_ROLLUP || '').toLowerCase() !== 'off') {
+        let running = false;
+        const tick = async () => {
+          if (running) return;
+          running = true;
+          try {
+            await analytics.rollupRecent();
+          } catch (err) {
+            strapi.log.error(`[analytics] rollup failed: ${err.message}`);
+          } finally {
+            running = false;
+          }
+        };
+        setTimeout(tick, 30 * 1000).unref();
+        setInterval(tick, 15 * 60 * 1000).unref();
+      }
+    } catch (err) {
+      strapi.log.error(`[analytics] setup failed: ${err.message}`);
+    }
+
     // Idempotent: creates FULLTEXT indexes on stories.headline / stories.body if missing.
     // Runs after Strapi's schema sync. Never blocks startup if it fails.
     try {

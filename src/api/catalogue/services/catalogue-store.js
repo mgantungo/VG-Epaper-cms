@@ -136,11 +136,16 @@ module.exports = ({ strapi }) => {
     });
   }
 
+  /** A plan readers can actually buy: a current kind and at least one
+   * publication. Plans left over from before Phase 0 (kinds such as daily or
+   * single_archive, no publications) are never offered or charged. */
+  const isSellable = (r) => KINDS.includes(r.kind) && (r.publications || []).length > 0;
+
   /** The version of each plan key on sale on `day`. */
   function currentByKey(rows, day) {
     const out = new Map();
     for (const r of rows) {
-      if (!isOnDay(r, day)) continue;
+      if (!isOnDay(r, day) || !isSellable(r)) continue;
       const have = out.get(r.key);
       if (!have || r.version > have.version) out.set(r.key, r);
     }

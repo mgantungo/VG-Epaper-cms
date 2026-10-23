@@ -563,7 +563,9 @@ module.exports = ({ strapi }) => {
       const codes = (latest.publications || []).map((p) => p.code).sort();
       const validFrom = body.validFrom ? String(body.validFrom) : kampalaToday();
       if (!isIsoDate(validFrom)) throw new CatalogueError(400, 'validFrom must be YYYY-MM-DD');
-      if (validFrom < kampalaToday()) throw new CatalogueError(400, 'A new price cannot start in the past');
+      // May be in the past (e.g. to record a price that already applied). Sales
+      // keep the version they were charged at, so earlier revenue never changes.
+      if (validFrom < '2000-01-01') throw new CatalogueError(400, 'validFrom is too far in the past');
 
       const price = body.price !== undefined ? cleanPrice(body.price) : Number(latest.price);
       const split = codes.length > 1
